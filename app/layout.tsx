@@ -9,7 +9,7 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Image Detection',
+  title: 'Sitetracker skunkworks CV Analyzer',
   description: 'Upload and vet images for items that should be present.',
 }
 

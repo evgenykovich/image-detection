@@ -126,7 +126,7 @@ export const UploadFiles = () => {
                 disabled={!selectedFiles}
                 onClick={handleSubmit}
               >
-                Upload
+                Detect
               </Button>
             </aside>
           </section>
