@@ -15,7 +15,7 @@ export const LandingNavbar = ({ hideButton = false }: LandingNavbarProps) => {
     <nav className="p-4 bg-transparent flex items-center justify-between">
       <Link href="/" className="flex items-center">
         <h1 className={cn('text-2xl font-bold text-white', font.className)}>
-          Detect Items in Image
+          Sitetracker skunkworks CV Analyzer
         </h1>
       </Link>
     </nav>
