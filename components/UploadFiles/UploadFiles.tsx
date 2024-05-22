@@ -100,6 +100,7 @@ export const UploadFiles = () => {
       )}
       <div className="mb-6">
         <Textarea
+          className="text-black/80"
           placeholder="Enter items to detect, separated by commas"
           value={items}
           onChange={(e) => setItems(e.target.value)}
