@@ -99,6 +99,7 @@ export const UploadFiles = () => {
   }
 
   const handleClear = () => {
+    setProgress(0)
     setSelectedFiles(undefined)
     setPreview(null)
     setResult('')
