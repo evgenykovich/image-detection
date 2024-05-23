@@ -8,11 +8,17 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import './UploadFiles.styles.css'
 
+enum Action {
+  DETECT = 'detect',
+  MEASURMENTS = 'measurments',
+}
+
 export const UploadFiles = () => {
   const [selectedFiles, setSelectedFiles] = useState<any>(undefined)
   const [items, setItems] = useState('')
   const [preview, setPreview] = useState<string | null>(null)
   const [result, setResult] = useState<any>('')
+  const [measurments, setMeasurments] = useState<any>('')
   const [progress, setProgress] = useState<number>(0)
 
   const compressImage = (file: File): Promise<File> => {
@@ -48,10 +54,10 @@ export const UploadFiles = () => {
     })
   }
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (action: string) => {
     const currentFile = selectedFiles?.[0]
 
-    if (!currentFile || !items) return
+    if (!currentFile) return
 
     try {
       setProgress(10)
@@ -59,7 +65,7 @@ export const UploadFiles = () => {
       setProgress(30)
       const base64Image = await convertToBase64(compressedFile)
       setProgress(50)
-      const response = await fetch('/api/detect', {
+      const response = await fetch(`/api/${action}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -72,8 +78,9 @@ export const UploadFiles = () => {
       setProgress(75)
       const { detectedItems } = await response.json()
       setProgress(100)
-      setResult(detectedItems)
-      setSelectedFiles(undefined)
+      action === Action.DETECT
+        ? setResult(detectedItems)
+        : setMeasurments(detectedItems)
     } catch (error) {
       console.error('Error analyzing image', error)
       setProgress(0)
@@ -89,6 +96,13 @@ export const UploadFiles = () => {
       setSelectedFiles(files)
       setPreview(URL.createObjectURL(file))
     }
+  }
+
+  const handleClear = () => {
+    setSelectedFiles(undefined)
+    setPreview(null)
+    setResult('')
+    setItems('')
   }
 
   return (
@@ -107,9 +121,9 @@ export const UploadFiles = () => {
         ></Textarea>
       </div>
 
-      <Dropzone onDrop={onDrop} multiple={false}>
+      <Dropzone onDrop={onDrop} multiple={false} disabled={selectedFiles?.[0]}>
         {({ getRootProps, getInputProps }) => (
-          <section>
+          <section className="w-full">
             <div {...getRootProps({ className: 'dropzone' })}>
               <input {...getInputProps()} />
               {preview ? (
@@ -120,23 +134,49 @@ export const UploadFiles = () => {
                 'Drag and drop file here, or click to select file'
               )}
             </div>
-            <aside className="selected-file-wrapper">
-              <Button
-                className="text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
-                disabled={!selectedFiles}
-                onClick={handleSubmit}
-              >
-                Detect
-              </Button>
+            <aside className="flex items-center justify-between w-full">
+              <div>
+                <Button
+                  className="text-white bg-blue-500 border-0 mr-4 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
+                  disabled={!selectedFiles}
+                  onClick={() => handleSubmit(Action.DETECT)}
+                >
+                  Detect
+                </Button>
+                <Button
+                  className="text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
+                  disabled={!selectedFiles}
+                  onClick={() => handleSubmit(Action.MEASURMENTS)}
+                >
+                  Get Measurments
+                </Button>
+              </div>
+              {selectedFiles && selectedFiles.length > 0 && (
+                <Button
+                  className="text-white bg-red-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
+                  onClick={handleClear}
+                >
+                  Clear
+                </Button>
+              )}
             </aside>
           </section>
         )}
       </Dropzone>
-      <div>
+      <div className="mt-3">
         {result && (
           <div className="text-white">
             <h2>Analysis Result:</h2>
             <div>{result}</div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3">
+        {measurments && (
+          <div className="text-white">
+            <h2>Measurments:</h2>
+            <div>{measurments}</div>
           </div>
         )}
       </div>

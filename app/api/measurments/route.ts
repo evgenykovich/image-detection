@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { detect } from '@/util/ai'
+import { measurments } from '@/util/ai'
 
 export const POST = async (request: any) => {
   const body = await request.json()
@@ -11,7 +11,7 @@ export const POST = async (request: any) => {
     })
   }
 
-  const analysisResult = await detect(image, items)
+  const analysisResult = await measurments(image, items)
 
   const detectedItems = analysisResult.message.content
 
