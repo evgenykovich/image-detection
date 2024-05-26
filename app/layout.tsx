@@ -1,4 +1,5 @@
 import React from 'react'
+import { Provider } from 'jotai'
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import { PrimeReactProvider } from 'primereact/api'
@@ -21,7 +22,9 @@ export default function RootLayout({
   return (
     <PrimeReactProvider>
       <html lang="en" className="light">
-        <body className={inter.className}>{children}</body>
+        <Provider>
+          <body className={inter.className}>{children}</body>
+        </Provider>
         <Toaster />
       </html>
     </PrimeReactProvider>
