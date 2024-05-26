@@ -1,8 +1,11 @@
 import { OpenAI } from 'openai'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import Anthropic from '@anthropic-ai/sdk'
 import { AIAction } from './enums'
+import { base64Helper } from './helpers'
 
-const env = process.env.GOOGLE_AI_API_KEY
+const googleAPIKey = process.env.GOOGLE_AI_API_KEY
+const claudeAPIKey = process.env.CLAUDE_API_KEY
 
 export const detect = async (imageBase64: string, items: string[]) => {
   const openai = new OpenAI()
@@ -29,7 +32,6 @@ export const detect = async (imageBase64: string, items: string[]) => {
       },
     ],
   })
-  console.log(response.choices[0])
 
   return response.choices[0]
 }
@@ -69,37 +71,89 @@ export const geminiDetectImage = async (
   action = AIAction.DETECT,
   items: string[]
 ) => {
-  const prefix = 'data:image/jpeg;base64,'
-  const imageBase64Data = imageBase64.startsWith(prefix)
-    ? imageBase64.substring(prefix.length)
-    : imageBase64
-  const genAI = new GoogleGenerativeAI(env as string)
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' })
+  const imageBase64Data = base64Helper(imageBase64)
+  const genAI = new GoogleGenerativeAI(googleAPIKey as string)
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' })
 
+    let prompt = ''
+
+    switch (action) {
+      case AIAction.DETECT:
+        prompt = `please analyze this image and detect if the following items are in the image: ${items.join(
+          ','
+        )}`
+        break
+      case AIAction.MEASURMENTS:
+        prompt = `please analyze this image and provide the rough measurments of either the items specified: ${items.join(
+          ','
+        )} and or the things you see in the image using rough estimates based on the items that might be in the image.`
+        break
+      default:
+        break
+    }
+
+    const image = {
+      inlineData: {
+        data: imageBase64Data,
+        mimeType: 'image/jpeg',
+      },
+    }
+
+    const result = await model.generateContent([prompt, image])
+    return result.response.text()
+  } catch (error) {
+    console.error('Error initializing Gemini', error)
+  }
+}
+
+export const claudeDetectImage = async (
+  imageBase64: string,
+  action = AIAction.DETECT,
+  items: string[]
+) => {
+  const anthropic = new Anthropic({ apiKey: claudeAPIKey as string })
+  const imageBase64Data = base64Helper(imageBase64)
   let prompt = ''
 
-  switch (action) {
-    case AIAction.DETECT:
-      prompt = `please analyze this image and detect if the following items are in the image: ${items.join(
-        ','
-      )}`
-      break
-    case AIAction.MEASURMENTS:
-      prompt = `please analyze this image and provide the rough measurments of either the items specified: ${items.join(
-        ','
-      )} and or the things you see in the image using rough estimates based on the items that might be in the image.`
-      break
-    default:
-      break
-  }
+  try {
+    switch (action) {
+      case AIAction.DETECT:
+        prompt = `please analyze this image and detect if the following items are in the image: ${items.join(
+          ','
+        )}`
+        break
+      case AIAction.MEASURMENTS:
+        prompt = `please analyze this image and provide the rough measurments of either the items specified: ${items.join(
+          ','
+        )} and or the things you see in the image using rough estimates based on the items that might be in the image.`
+        break
+      default:
+        break
+    }
+    const message = await anthropic.messages.create({
+      model: 'claude-3-opus-20240229',
+      max_tokens: 1024,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/jpeg',
+                data: imageBase64Data,
+              },
+            },
+            { type: 'text', text: prompt },
+          ],
+        },
+      ],
+    })
 
-  const image = {
-    inlineData: {
-      data: imageBase64Data,
-      mimeType: 'image/jpeg',
-    },
+    return message.content[0].text
+  } catch (error) {
+    console.error('Error initializing Claude', error)
   }
-
-  const result = await model.generateContent([prompt, image])
-  return result.response.text()
 }

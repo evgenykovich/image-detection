@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { geminiDetectImage, measurments } from '@/util/ai'
+import { claudeDetectImage, geminiDetectImage, measurments } from '@/util/ai'
 import { AIAction, AISelectorEnum } from '@/util/enums'
 
 export const POST = async (request: any) => {
@@ -26,6 +26,13 @@ export const POST = async (request: any) => {
       )
       detectedItems = analysisResult
       break
+    case AISelectorEnum.CLAUDE:
+      analysisResult = await claudeDetectImage(
+        image,
+        AIAction.MEASURMENTS,
+        items
+      )
+      detectedItems = analysisResult
     default:
       break
   }
