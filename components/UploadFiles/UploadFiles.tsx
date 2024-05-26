@@ -135,26 +135,26 @@ export const UploadFiles = () => {
                 'Drag and drop file here, or click to select file'
               )}
             </div>
-            <aside className="flex items-center justify-between w-full">
-              <div>
+            <aside className="flex flex-col sm:flex-row items-center justify-between w-full">
+              <div className="flex flex-col sm:flex-row items-center sm:space-x-4 w-full sm:w-auto">
                 <Button
-                  className="text-white bg-blue-500 border-0 mr-4 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
+                  className="w-full sm:w-auto mb-2 sm:mb-0 text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
                   disabled={!selectedFiles}
                   onClick={() => handleSubmit(Action.DETECT)}
                 >
                   Detect
                 </Button>
                 <Button
-                  className="text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
+                  className="w-full sm:w-auto mb-2 sm:mb-0 text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
                   disabled={!selectedFiles}
                   onClick={() => handleSubmit(Action.MEASURMENTS)}
                 >
-                  Get Measurments
+                  Get Measurements
                 </Button>
               </div>
               {selectedFiles && selectedFiles.length > 0 && (
                 <Button
-                  className="text-white bg-red-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
+                  className="w-full sm:w-auto text-white bg-red-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg mt-2 sm:mt-0"
                   onClick={handleClear}
                 >
                   Clear
