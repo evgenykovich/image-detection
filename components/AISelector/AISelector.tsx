@@ -27,6 +27,10 @@ export const AISelector = () => {
           <RadioGroupItem value={AISelectorEnum.GEMINI} id="r2" />
           <Label htmlFor="r1">{AISelectorEnum.GEMINI}</Label>
         </div>
+        <div className="flex items-center space-x-2 ">
+          <RadioGroupItem value={AISelectorEnum.CLAUDE} id="r2" />
+          <Label htmlFor="r1">{AISelectorEnum.CLAUDE}</Label>
+        </div>
       </RadioGroup>
     </div>
   )
