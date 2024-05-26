@@ -5,7 +5,7 @@ import { AISelector } from '@/components/AISelector'
 
 const LandingPage = async () => {
   return (
-    <div className="h-max flex justify-between items-center flex-col">
+    <div className="h-max flex justify-between items-center flex-col overflow-hidden mb-6">
       <div>
         <LandingNavbar />
         <LandingHero />

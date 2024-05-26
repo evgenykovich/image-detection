@@ -1,5 +1,6 @@
 import { OpenAI } from 'openai'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { AIAction } from './enums'
 
 const env = process.env.GOOGLE_AI_API_KEY
 
@@ -65,6 +66,7 @@ export const measurments = async (imageBase64: string, items: string[]) => {
 
 export const geminiDetectImage = async (
   imageBase64: string,
+  action = AIAction.DETECT,
   items: string[]
 ) => {
   const prefix = 'data:image/jpeg;base64,'
@@ -74,9 +76,22 @@ export const geminiDetectImage = async (
   const genAI = new GoogleGenerativeAI(env as string)
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' })
 
-  const prompt = `please analyze this image and detect if the following items are in the image: ${items.join(
-    ','
-  )}`
+  let prompt = ''
+
+  switch (action) {
+    case AIAction.DETECT:
+      prompt = `please analyze this image and detect if the following items are in the image: ${items.join(
+        ','
+      )}`
+      break
+    case AIAction.MEASURMENTS:
+      prompt = `please analyze this image and provide the rough measurments of either the items specified: ${items.join(
+        ','
+      )} and or the things you see in the image using rough estimates based on the items that might be in the image.`
+      break
+    default:
+      break
+  }
 
   const image = {
     inlineData: {
