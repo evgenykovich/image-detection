@@ -10,11 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { aiInUse } from '@/store'
 import { handleAPICall } from '@/util/api'
 import './UploadFiles.styles.css'
-
-enum Action {
-  DETECT = 'detect',
-  MEASURMENTS = 'measurments',
-}
+import { AIAction } from '@/util/enums'
 
 export const UploadFiles = () => {
   const [selectedFiles, setSelectedFiles] = useState<any>(undefined)
@@ -78,7 +74,7 @@ export const UploadFiles = () => {
       setProgress(75)
       const { detectedItems } = await response.json()
       setProgress(100)
-      action === Action.DETECT
+      action === AIAction.DETECT
         ? setResult(detectedItems)
         : setMeasurments(detectedItems)
     } catch (error) {
@@ -140,14 +136,14 @@ export const UploadFiles = () => {
                 <Button
                   className="w-full sm:w-auto mb-2 sm:mb-0 text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
                   disabled={!selectedFiles}
-                  onClick={() => handleSubmit(Action.DETECT)}
+                  onClick={() => handleSubmit(AIAction.DETECT)}
                 >
                   Detect
                 </Button>
                 <Button
                   className="w-full sm:w-auto mb-2 sm:mb-0 text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
                   disabled={!selectedFiles}
-                  onClick={() => handleSubmit(Action.MEASURMENTS)}
+                  onClick={() => handleSubmit(AIAction.MEASURMENTS)}
                 >
                   Get Measurements
                 </Button>

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { geminiDetectImage, detect } from '@/util/ai'
-import { AISelectorEnum } from '@/util/enums'
+import { AIAction, AISelectorEnum } from '@/util/enums'
 
 export const POST = async (request: any) => {
   const body = await request.json()
@@ -20,7 +20,7 @@ export const POST = async (request: any) => {
       detectedItems = analysisResult?.message.content
       break
     case AISelectorEnum.GEMINI:
-      analysisResult = await geminiDetectImage(image, items)
+      analysisResult = await geminiDetectImage(image, AIAction.DETECT, items)
       detectedItems = analysisResult
       break
     default:
