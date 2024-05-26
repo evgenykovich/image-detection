@@ -27,8 +27,6 @@ export const POST = async (request: any) => {
       break
   }
 
-  // const analysisResult = await detect(image, items)
-
   return new NextResponse(JSON.stringify({ detectedItems }), {
     status: 200,
   })
