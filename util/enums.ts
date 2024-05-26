@@ -1,7 +1,7 @@
 export enum AISelectorEnum {
   OPEN_AI = 'OpenAI gpt-4o',
-  GEMINI = 'Gemini light',
-  CLAUDE = 'Claude 3',
+  GEMINI = 'Google gemini-light',
+  CLAUDE = 'Anthropic Claude-3',
 }
 
 export enum AIAction {
