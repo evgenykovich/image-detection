@@ -117,7 +117,6 @@ export const UploadFiles = () => {
           onChange={(e) => setItems(e.target.value)}
         ></Textarea>
       </div>
-
       <Dropzone onDrop={onDrop} multiple={false} disabled={selectedFiles?.[0]}>
         {({ getRootProps, getInputProps }) => (
           <section className="w-full">
