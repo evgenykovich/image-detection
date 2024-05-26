@@ -1,7 +1,5 @@
 import { AISelectorEnum } from './enums'
 
-export const createURL = (path: string) => window.location.origin + path
-
 type APICallType = {
   action: string
   base64Image: string
