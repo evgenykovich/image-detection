@@ -8,7 +8,7 @@ import { AISelectorEnum } from '@/util/enums'
 
 export const AISelector = () => {
   const [ai, setAI] = useAtom(aiInUse)
-  const handleAIChange = (value: string) => {
+  const handleAIChange = (value: AISelectorEnum) => {
     setAI(value)
   }
 
@@ -17,7 +17,7 @@ export const AISelector = () => {
       <RadioGroup
         defaultValue={AISelectorEnum.OPEN_AI}
         className="flex justify-between items-center max-sm:flex-col max-sm:items-start"
-        onValueChange={(value) => handleAIChange(value)}
+        onValueChange={(value) => handleAIChange(value as AISelectorEnum)}
       >
         <div className="flex items-center space-x-2">
           <RadioGroupItem value={AISelectorEnum.OPEN_AI} id="r1" />

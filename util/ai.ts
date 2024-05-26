@@ -1,7 +1,7 @@
 import { OpenAI } from 'openai'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import Anthropic from '@anthropic-ai/sdk'
-import { AIAction } from './enums'
+import { AIAction, mimeType } from './enums'
 import { base64Helper } from './helpers'
 
 const googleAPIKey = process.env.GOOGLE_AI_API_KEY
@@ -96,7 +96,7 @@ export const geminiDetectImage = async (
     const image = {
       inlineData: {
         data: imageBase64Data,
-        mimeType: 'image/jpeg',
+        mimeType: mimeType.JPEG,
       },
     }
 
@@ -142,7 +142,7 @@ export const claudeDetectImage = async (
               type: 'image',
               source: {
                 type: 'base64',
-                media_type: 'image/jpeg',
+                media_type: mimeType.JPEG,
                 data: imageBase64Data,
               },
             },

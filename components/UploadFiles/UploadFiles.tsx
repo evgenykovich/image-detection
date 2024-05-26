@@ -83,7 +83,7 @@ export const UploadFiles = () => {
     }
   }
 
-  const onDrop = (files: any) => {
+  const onDrop = (files: File[]) => {
     setPreview(null)
     setProgress(0)
     setResult('')

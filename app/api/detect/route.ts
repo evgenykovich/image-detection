@@ -5,7 +5,6 @@ import { AIAction, AISelectorEnum } from '@/util/enums'
 export const POST = async (request: any) => {
   const body = await request.json()
   const { image, items, aiToUse } = body
-  console.log('aiToUse', aiToUse)
 
   if (!image || !items) {
     return new NextResponse(JSON.stringify({ error: 'Invalid request' }), {

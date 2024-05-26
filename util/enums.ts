@@ -8,3 +8,8 @@ export enum AIAction {
   DETECT = 'detect',
   MEASURMENTS = 'measurments',
 }
+
+export enum mimeType {
+  JPEG = 'image/jpeg',
+  PNG = 'image/png',
+}

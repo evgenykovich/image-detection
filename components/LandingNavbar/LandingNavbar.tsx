@@ -6,11 +6,7 @@ import { cn } from '@/lib/utils'
 
 const font = Montserrat({ weight: '600', subsets: ['latin'] })
 
-interface LandingNavbarProps {
-  hideButton?: boolean
-}
-
-export const LandingNavbar = ({ hideButton = false }: LandingNavbarProps) => {
+export const LandingNavbar = () => {
   return (
     <nav className="p-4 bg-transparent flex items-center justify-between">
       <Link href="/" className="flex items-center">
