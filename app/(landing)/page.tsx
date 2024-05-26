@@ -1,13 +1,19 @@
 import { LandingNavbar } from '@/components/LandingNavbar'
 import { LandingHero } from '@/components/LandingHero'
 import { LandingContent } from '@/components/LandingContent'
+import { AISelector } from '@/components/AISelector'
 
-const LandingPage = () => {
+const LandingPage = async () => {
   return (
-    <div className="h-full">
-      <LandingNavbar />
-      <LandingHero />
-      <LandingContent />
+    <div className="h-max flex justify-between items-center flex-col">
+      <div>
+        <LandingNavbar />
+        <LandingHero />
+        <LandingContent />
+      </div>
+      <div>
+        <AISelector />
+      </div>
     </div>
   )
 }

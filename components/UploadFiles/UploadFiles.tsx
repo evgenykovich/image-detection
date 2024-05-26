@@ -1,11 +1,14 @@
 'use client'
 
 import React, { useState } from 'react'
+import { useAtomValue } from 'jotai'
 import Image from 'next/image'
 import Dropzone from 'react-dropzone'
 import { ProgressBar } from 'primereact/progressbar'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { aiInUse } from '@/store'
+import { handleAPICall } from '@/util/api'
 import './UploadFiles.styles.css'
 
 enum Action {
@@ -20,6 +23,7 @@ export const UploadFiles = () => {
   const [result, setResult] = useState<any>('')
   const [measurments, setMeasurments] = useState<any>('')
   const [progress, setProgress] = useState<number>(0)
+  const useAI = useAtomValue(aiInUse)
 
   const compressImage = (file: File): Promise<File> => {
     return new Promise((resolve) => {
@@ -65,15 +69,11 @@ export const UploadFiles = () => {
       setProgress(30)
       const base64Image = await convertToBase64(compressedFile)
       setProgress(50)
-      const response = await fetch(`/api/${action}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: base64Image,
-          items: items.split(',').map((item) => item.trim()),
-        }),
+      const response = await handleAPICall({
+        action,
+        base64Image,
+        items,
+        aiToUse: useAI,
       })
       setProgress(75)
       const { detectedItems } = await response.json()
