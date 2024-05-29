@@ -27,6 +27,7 @@ export const UploadFiles = () => {
   const [resultsArray, setResultsArray] = useState<any>([])
   const [measurmentsArray, setMeasurmentsArray] = useState<any>([])
   const [progress, setProgress] = useState<number>(0)
+
   const useAI = useAtomValue(aiInUse)
 
   const compressImage = (file: File): Promise<File> => {
