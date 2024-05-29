@@ -8,6 +8,12 @@ import { base64Helper } from './helpers'
 const googleAPIKey = process.env.GOOGLE_AI_API_KEY
 const claudeAPIKey = process.env.CLAUDE_API_KEY
 
+AWS.config.update({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION,
+})
+
 export const detect = async (imageBase64: string, items: string[]) => {
   const openai = new OpenAI()
 
@@ -178,5 +184,5 @@ export const awsRekognitionDetectImage = async (
 
   const detectedItems = response.Labels?.map((label: any) => label.Name)
 
-  return detectedItems
+  return detectedItems?.join(', ')
 }

@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server'
-import { geminiDetectImage, detect, claudeDetectImage } from '@/util/ai'
+import {
+  geminiDetectImage,
+  detect,
+  claudeDetectImage,
+  awsRekognitionDetectImage,
+} from '@/util/ai'
 import { AIAction, AISelectorEnum } from '@/util/enums'
 
 export const POST = async (request: any) => {
@@ -24,6 +29,10 @@ export const POST = async (request: any) => {
       break
     case AISelectorEnum.CLAUDE:
       analysisResult = await claudeDetectImage(image, AIAction.DETECT, items)
+      detectedItems = analysisResult
+      break
+    case AISelectorEnum.AWS_REKOGNITION:
+      analysisResult = await awsRekognitionDetectImage(image, items)
       detectedItems = analysisResult
     default:
       break

@@ -140,6 +140,26 @@ export const UploadFiles = () => {
     setItems('')
   }
 
+  const renderGetMeasurments = () => {
+    if (useAI === AISelectorEnum.AWS_REKOGNITION) {
+      return (
+        <div>
+          *AWS Rekognition returns only items detected on the image provided*
+        </div>
+      )
+    }
+
+    return (
+      <Button
+        className="w-full sm:w-auto mb-2 sm:mb-0 text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
+        disabled={!selectedFiles}
+        onClick={() => handleSubmit(AIAction.MEASURMENTS)}
+      >
+        Get Measurements
+      </Button>
+    )
+  }
+
   return (
     <div>
       {progress !== 0 && (
@@ -177,13 +197,7 @@ export const UploadFiles = () => {
                 >
                   Detect
                 </Button>
-                <Button
-                  className="w-full sm:w-auto mb-2 sm:mb-0 text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
-                  disabled={!selectedFiles}
-                  onClick={() => handleSubmit(AIAction.MEASURMENTS)}
-                >
-                  Get Measurements
-                </Button>
+                {renderGetMeasurments()}
               </div>
               {selectedFiles && selectedFiles.length > 0 && (
                 <Button
