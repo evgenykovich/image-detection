@@ -1,11 +1,18 @@
 import { OpenAI } from 'openai'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import Anthropic from '@anthropic-ai/sdk'
+import AWS from 'aws-sdk'
 import { AIAction, mimeType } from './enums'
 import { base64Helper } from './helpers'
 
 const googleAPIKey = process.env.GOOGLE_AI_API_KEY
 const claudeAPIKey = process.env.CLAUDE_API_KEY
+
+AWS.config.update({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION,
+})
 
 export const detect = async (imageBase64: string, items: string[]) => {
   const openai = new OpenAI()
@@ -156,4 +163,26 @@ export const claudeDetectImage = async (
   } catch (error) {
     console.error('Error initializing Claude', error)
   }
+}
+
+export const awsRekognitionDetectImage = async (
+  imageBase64: string,
+  items: string[]
+) => {
+  const rekognition = new AWS.Rekognition()
+  const imageBase64Data = base64Helper(imageBase64)
+
+  const params = {
+    Image: {
+      Bytes: Buffer.from(imageBase64Data, 'base64'),
+    },
+    MaxLabels: 10,
+    MinConfidence: 70,
+  }
+
+  const response = await rekognition.detectLabels(params).promise()
+
+  const detectedItems = response.Labels?.map((label: any) => label.Name)
+
+  return detectedItems?.join(', ')
 }
