@@ -16,6 +16,7 @@ const aiMapper = {
   0: AISelectorEnum.OPEN_AI,
   1: AISelectorEnum.GEMINI,
   2: AISelectorEnum.CLAUDE,
+  3: AISelectorEnum.AWS_REKOGNITION,
 }
 
 export const UploadFiles = () => {
