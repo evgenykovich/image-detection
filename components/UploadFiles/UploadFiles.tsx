@@ -8,9 +8,15 @@ import { ProgressBar } from 'primereact/progressbar'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { aiInUse } from '@/store'
-import { handleAPICall } from '@/util/api'
+import { handleAPICall, handleAllAIAPICall } from '@/util/api'
+import { AIAction, AISelectorEnum } from '@/util/enums'
 import './UploadFiles.styles.css'
-import { AIAction } from '@/util/enums'
+
+const aiMapper = {
+  0: AISelectorEnum.OPEN_AI,
+  1: AISelectorEnum.GEMINI,
+  2: AISelectorEnum.CLAUDE,
+}
 
 export const UploadFiles = () => {
   const [selectedFiles, setSelectedFiles] = useState<any>(undefined)
@@ -18,6 +24,8 @@ export const UploadFiles = () => {
   const [preview, setPreview] = useState<string | null>(null)
   const [result, setResult] = useState<any>('')
   const [measurments, setMeasurments] = useState<any>('')
+  const [resultsArray, setResultsArray] = useState<any>([])
+  const [measurmentsArray, setMeasurmentsArray] = useState<any>([])
   const [progress, setProgress] = useState<number>(0)
   const useAI = useAtomValue(aiInUse)
 
@@ -65,18 +73,48 @@ export const UploadFiles = () => {
       setProgress(30)
       const base64Image = await convertToBase64(compressedFile)
       setProgress(50)
-      const response = await handleAPICall({
-        action,
-        base64Image,
-        items,
-        aiToUse: useAI,
-      })
-      setProgress(75)
-      const { detectedItems } = await response.json()
-      setProgress(100)
-      action === AIAction.DETECT
-        ? setResult(detectedItems)
-        : setMeasurments(detectedItems)
+      let response = null
+      if (AISelectorEnum.ALL_AI === useAI) {
+        if (result || measurments) {
+          setResult('')
+          setMeasurments('')
+        }
+        response = await handleAllAIAPICall({
+          action,
+          base64Image,
+          items,
+        })
+        setProgress(75)
+        const results = await Promise.all(
+          response.map(async (res) => {
+            const { detectedItems } = await res.json()
+            return detectedItems
+          })
+        )
+
+        setProgress(100)
+        action === AIAction.DETECT
+          ? setResultsArray(results)
+          : setMeasurmentsArray(results)
+      } else {
+        if (resultsArray.length > 0 || measurmentsArray.length > 0) {
+          setResultsArray([])
+          setMeasurmentsArray([])
+        }
+        response = await handleAPICall({
+          action,
+          base64Image,
+          items,
+          aiToUse: useAI,
+        })
+        setProgress(75)
+        const { detectedItems } = await response?.json()
+        setProgress(100)
+
+        action === AIAction.DETECT
+          ? setResult(detectedItems)
+          : setMeasurments(detectedItems)
+      }
     } catch (error) {
       console.error('Error analyzing image', error)
       setProgress(0)
@@ -173,6 +211,41 @@ export const UploadFiles = () => {
           <div className="text-white">
             <h2>Measurments:</h2>
             <div>{measurments}</div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3">
+        {resultsArray.length > 0 && (
+          <div>
+            {resultsArray.map((result: any, index: number) => (
+              <div key={index} className="mt-3">
+                <h2>
+                  Analysis Result:
+                  <span className="font-bold ml-1">
+                    {aiMapper[index as keyof typeof aiMapper]}
+                  </span>
+                </h2>
+                <div>{result}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="mt-3">
+        {measurmentsArray.length > 0 && (
+          <div>
+            {measurmentsArray.map((result: any, index: number) => (
+              <div key={index} className="mt-3">
+                <h2>
+                  Measurments:
+                  <span className="font-bold ml-1">
+                    {aiMapper[index as keyof typeof aiMapper]}
+                  </span>
+                </h2>
+                <div>{result}</div>
+              </div>
+            ))}
           </div>
         )}
       </div>

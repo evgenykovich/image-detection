@@ -11,7 +11,7 @@ export const handleAPICall = async ({
   action,
   base64Image,
   items,
-  aiToUse = AISelectorEnum.OPEN_AI,
+  aiToUse = AISelectorEnum.ALL_AI,
 }: APICallType) => {
   return await fetch(`/api/${action}`, {
     method: 'POST',
@@ -24,4 +24,29 @@ export const handleAPICall = async ({
       aiToUse,
     }),
   })
+}
+
+export const handleAllAIAPICall = async ({
+  action,
+  base64Image,
+  items,
+}: APICallType) => {
+  const iterableValues = Object.values(AISelectorEnum).filter(
+    (x) => x !== AISelectorEnum.ALL_AI
+  )
+  return await Promise.all(
+    iterableValues.map(async (ai) => {
+      return await fetch(`/api/${action}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: base64Image,
+          items: items.split(',').map((item: string) => item.trim()),
+          aiToUse: ai,
+        }),
+      })
+    })
+  )
 }
