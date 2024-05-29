@@ -7,10 +7,11 @@ import { aiInUse } from '@/store'
 import { AISelectorEnum } from '@/util/enums'
 
 export const AISelector = () => {
-  const [ai, setAI] = useAtom(aiInUse)
+  const [_, setAI] = useAtom(aiInUse)
   const handleAIChange = (value: AISelectorEnum) => {
     setAI(value)
   }
+  const aiAvailableList = Object.values(AISelectorEnum)
 
   return (
     <div className="text-white w-full">
@@ -19,22 +20,13 @@ export const AISelector = () => {
         className="flex justify-between items-center max-sm:flex-col max-sm:items-start"
         onValueChange={(value) => handleAIChange(value as AISelectorEnum)}
       >
-        <div className="flex items-center space-x-2 ">
-          <RadioGroupItem value={AISelectorEnum.ALL_AI} id="r2" />
-          <Label htmlFor="r1">{AISelectorEnum.ALL_AI}</Label>
-        </div>
-        <div className="flex items-center space-x-2">
-          <RadioGroupItem value={AISelectorEnum.OPEN_AI} id="r1" />
-          <Label htmlFor="r1">{AISelectorEnum.OPEN_AI}</Label>
-        </div>
-        <div className="flex items-center space-x-2 ">
-          <RadioGroupItem value={AISelectorEnum.GEMINI} id="r2" />
-          <Label htmlFor="r1">{AISelectorEnum.GEMINI}</Label>
-        </div>
-        <div className="flex items-center space-x-2 ">
-          <RadioGroupItem value={AISelectorEnum.CLAUDE} id="r2" />
-          <Label htmlFor="r1">{AISelectorEnum.CLAUDE}</Label>
-        </div>
+        {aiAvailableList.length > 0 &&
+          aiAvailableList.map((ai) => (
+            <div key={ai} className="flex items-center space-x-2">
+              <RadioGroupItem value={ai} id={ai} />
+              <Label htmlFor={ai}>{ai}</Label>
+            </div>
+          ))}
       </RadioGroup>
     </div>
   )

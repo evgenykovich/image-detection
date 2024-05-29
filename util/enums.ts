@@ -1,8 +1,9 @@
 export enum AISelectorEnum {
+  ALL_AI = 'All AI',
   OPEN_AI = 'OpenAI gpt-4o',
   GEMINI = 'Google gemini-light',
   CLAUDE = 'Anthropic Claude-3',
-  ALL_AI = 'All AI',
+  AWS_REKOGNITION = 'AWS Rekognition',
 }
 
 export enum AIAction {
