@@ -16,7 +16,7 @@ export const AISelector = () => {
   return (
     <div className="text-white w-full">
       <RadioGroup
-        defaultValue={AISelectorEnum.ALL_AI}
+        defaultValue={AISelectorEnum.OPEN_AI}
         className="flex justify-between items-center max-sm:flex-col max-sm:items-start"
         onValueChange={(value) => handleAIChange(value as AISelectorEnum)}
       >
