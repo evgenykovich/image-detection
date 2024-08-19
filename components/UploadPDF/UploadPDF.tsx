@@ -22,21 +22,27 @@ export const UploadPDF = () => {
     const currentFile = selectedFiles?.[0]
 
     if (!currentFile) return
+    const formData = new FormData()
+    formData.append('file', currentFile)
+    formData.append('question', items)
 
     try {
       setProgress(10)
 
       setProgress(50)
-      let response = null
       if (resultsArray.length > 0) {
         setResultsArray([])
       }
-      response = await generalApiCall(route, currentFile)
+
+      const response = await fetch(`/api/${route}`, {
+        method: 'POST',
+        body: formData,
+      })
       setProgress(75)
-      const { detectedItems } = await response?.json()
+      const { answer } = await response?.json()
       setProgress(100)
 
-      setResult(detectedItems)
+      setResult(answer)
     } catch (error) {
       console.error('Error analyzing image', error)
       setProgress(0)
@@ -82,9 +88,9 @@ export const UploadPDF = () => {
           <section className="w-full">
             <div {...getRootProps({ className: 'dropzone' })}>
               <input {...getInputProps()} />
-              {preview ? (
-                <div className="selected-file">
-                  <Image height={350} width={350} src={preview} alt="Image" />
+              {selectedFiles && selectedFiles.length > 0 ? (
+                <div className="uploaded-file-info">
+                  <p>{selectedFiles[0].name} uploaded successfully</p>
                 </div>
               ) : (
                 'Drag and drop file here, or click to select file'
@@ -97,7 +103,7 @@ export const UploadPDF = () => {
                   disabled={!selectedFiles}
                   onClick={() => handleSubmit(AIAction.RETRIEVAL)}
                 >
-                  Detect
+                  Analyze
                 </Button>
               </div>
               {selectedFiles && selectedFiles.length > 0 && (

@@ -7,8 +7,11 @@ type APICallType = {
   aiToUse?: string
 }
 
-export const generalApiCall = async (route: string, file: any) => {
-  debugger
+export const generalApiCall = async (
+  route: string,
+  file: any,
+  items: string
+) => {
   try {
     return await fetch(`/api/${route}`, {
       method: 'POST',
@@ -17,6 +20,7 @@ export const generalApiCall = async (route: string, file: any) => {
       },
       body: JSON.stringify({
         file,
+        question: items,
       }),
     })
   } catch (error) {
