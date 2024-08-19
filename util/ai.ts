@@ -1,4 +1,13 @@
 import { OpenAI } from 'openai'
+import pdf from 'pdf-parse'
+import { OpenAI as langChainOpenAI } from 'langchain/llms/openai'
+import { StructuredOutputParser } from 'langchain/output_parsers'
+import { PromptTemplate } from 'langchain/prompts'
+import { Document } from 'langchain/document'
+import { loadQARefineChain } from 'langchain/chains'
+import { OpenAIEmbeddings } from 'langchain/embeddings/openai'
+import { MemoryVectorStore } from 'langchain/vectorstores/memory'
+
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import Anthropic from '@anthropic-ai/sdk'
 import AWS from 'aws-sdk'
@@ -13,6 +22,36 @@ AWS.config.update({
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   region: process.env.AWS_REGION,
 })
+
+const extractTextFromPDF = async (pdfBuffer: Buffer): Promise<string> => {
+  const data = await pdf(pdfBuffer)
+  return data.text
+}
+
+export const qa = async (question: string, pdfBuffer: Buffer) => {
+  const content = await extractTextFromPDF(pdfBuffer)
+
+  const doc = new Document({
+    pageContent: content,
+    metadata: { id: 'pdf-doc', createdAt: new Date() },
+  })
+
+  const model = new langChainOpenAI({
+    temperature: 0,
+    modelName: 'gpt-3.5-turbo',
+  })
+
+  const chain = loadQARefineChain(model)
+  const embeddings = new OpenAIEmbeddings()
+  const store = await MemoryVectorStore.fromDocuments([doc], embeddings)
+  const relevantDocs = await store.similaritySearch(question)
+  const res = await chain.call({
+    input_documents: relevantDocs,
+    question,
+  })
+
+  return res.output_text
+}
 
 export const detect = async (imageBase64: string, items: string[]) => {
   const openai = new OpenAI()

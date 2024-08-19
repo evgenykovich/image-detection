@@ -9,6 +9,7 @@ export enum AISelectorEnum {
 export enum AIAction {
   DETECT = 'detect',
   MEASURMENTS = 'measurments',
+  RETRIEVAL = 'retrieval',
 }
 
 export enum mimeType {
