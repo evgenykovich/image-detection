@@ -7,6 +7,27 @@ type APICallType = {
   aiToUse?: string
 }
 
+export const generalApiCall = async (
+  route: string,
+  file: any,
+  items: string
+) => {
+  try {
+    return await fetch(`/api/${route}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        file,
+        question: items,
+      }),
+    })
+  } catch (error) {
+    console.error('Error api call', error)
+  }
+}
+
 export const handleAPICall = async ({
   action,
   base64Image,
