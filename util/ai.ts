@@ -35,7 +35,7 @@ export const qa = async (question: string, pdfBuffer: Buffer) => {
 
   const model = new langChainOpenAI({
     temperature: 0,
-    modelName: 'gpt-3.5-turbo',
+    modelName: 'gpt-4o',
   })
 
   const chain = loadQARefineChain(model)
