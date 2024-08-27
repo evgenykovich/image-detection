@@ -1,4 +1,5 @@
 import { OpenAI } from 'openai'
+import { z } from 'zod'
 import AWS from 'aws-sdk'
 import pdf from 'pdf-parse'
 import { OpenAI as langChainOpenAI } from 'langchain/llms/openai'
@@ -50,6 +51,13 @@ export const qa = async (question: string, pdfBuffer: Buffer) => {
   return res.output_text
 }
 
+const FieldValueSchema = z.object({
+  field: z.string(),
+  value: z.string(),
+})
+
+const FieldValuesArraySchema = z.array(FieldValueSchema)
+
 export const getValueFromFieldsInImage = async (
   imageBase64: string,
   fields: string[]
@@ -59,9 +67,9 @@ export const getValueFromFieldsInImage = async (
     temperature: 0,
   })
 
-  const prompt = `please analyze this image and extract the value of the following fields: ${fields.join(
+  const prompt = `Please analyze this image and extract the value of the following fields: ${fields.join(
     ', '
-  )}`
+  )}. Return the results as a JSON array of objects, where each object has a 'field' and a 'value' property.`
 
   const response = await model.call([
     {
@@ -76,7 +84,16 @@ export const getValueFromFieldsInImage = async (
     },
   ] as any)
 
-  return response
+  try {
+    const cleanedResponse = response.replace(/```json\n|\n```/g, '').trim()
+    const validatedResponse = FieldValuesArraySchema.parse(
+      JSON.parse(cleanedResponse)
+    )
+    return validatedResponse
+  } catch (error) {
+    console.error('Error parsing or validating response:', error)
+    throw new Error('Failed to process the AI response')
+  }
 }
 
 export const detect = async (imageBase64: string, items: string[]) => {
