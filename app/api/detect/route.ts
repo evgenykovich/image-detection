@@ -16,27 +16,25 @@ export const POST = async (request: any) => {
       status: 400,
     })
   }
-  let analysisResult = null
-  let detectedItems = null
-  switch (aiToUse) {
-    case AISelectorEnum.OPEN_AI:
-      analysisResult = await detect(image, items)
-      detectedItems = analysisResult?.message.content
-      break
-    case AISelectorEnum.GEMINI:
-      analysisResult = await geminiDetectImage(image, AIAction.DETECT, items)
-      detectedItems = analysisResult
-      break
-    case AISelectorEnum.CLAUDE:
-      analysisResult = await claudeDetectImage(image, AIAction.DETECT, items)
-      detectedItems = analysisResult
-      break
-    case AISelectorEnum.AWS_REKOGNITION:
-      analysisResult = await awsRekognitionDetectImage(image, items)
-      detectedItems = analysisResult
-    default:
-      break
+  const detectFunctions = {
+    [AISelectorEnum.OPEN_AI]: detect,
+    [AISelectorEnum.GEMINI]: (image: string, items: string[]) =>
+      geminiDetectImage(image, AIAction.DETECT, items),
+    [AISelectorEnum.CLAUDE]: (image: string, items: string[]) =>
+      claudeDetectImage(image, AIAction.DETECT, items),
+    [AISelectorEnum.AWS_REKOGNITION]: awsRekognitionDetectImage,
   }
+
+  const detectFunction =
+    detectFunctions[aiToUse as keyof typeof detectFunctions]
+
+  if (!detectFunction) {
+    return new NextResponse(JSON.stringify({ error: 'Invalid AI selection' }), {
+      status: 400,
+    })
+  }
+
+  const detectedItems = await detectFunction(image, items)
 
   return new NextResponse(JSON.stringify({ detectedItems }), {
     status: 200,

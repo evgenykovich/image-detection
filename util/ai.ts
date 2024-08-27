@@ -50,33 +50,59 @@ export const qa = async (question: string, pdfBuffer: Buffer) => {
   return res.output_text
 }
 
-export const detect = async (imageBase64: string, items: string[]) => {
-  const openai = new OpenAI()
-
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: `please analyze this image and detect if the following items are in the image: ${items.join(
-              ','
-            )}`,
-          },
-          {
-            type: 'image_url',
-            image_url: {
-              url: imageBase64,
-            },
-          },
-        ],
-      },
-    ],
+export const getValueFromFieldsInImage = async (
+  imageBase64: string,
+  fields: string[]
+) => {
+  const model = new langChainOpenAI({
+    modelName: 'gpt-4o',
+    temperature: 0,
   })
 
-  return response.choices[0]
+  const prompt = `please analyze this image and extract the value of the following fields: ${fields.join(
+    ', '
+  )}`
+
+  const response = await model.call([
+    {
+      type: 'text',
+      text: prompt,
+    },
+    {
+      type: 'image_url',
+      image_url: {
+        url: imageBase64,
+      },
+    },
+  ] as any)
+
+  return response
+}
+
+export const detect = async (imageBase64: string, items: string[]) => {
+  const model = new langChainOpenAI({
+    modelName: 'gpt-4o',
+    temperature: 0,
+  })
+
+  const prompt = `Please analyze this image and detect if the following items are in the image: ${items.join(
+    ', '
+  )}`
+
+  const response = await model.call([
+    {
+      type: 'text',
+      text: prompt,
+    },
+    {
+      type: 'image_url',
+      image_url: {
+        url: imageBase64,
+      },
+    },
+  ] as any)
+
+  return response
 }
 
 export const measurments = async (imageBase64: string, items: string[]) => {
