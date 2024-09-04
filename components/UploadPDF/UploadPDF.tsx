@@ -6,6 +6,7 @@ import Dropzone from 'react-dropzone'
 import { ProgressBar } from 'primereact/progressbar'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
 import { generalApiCall } from '@/util/api'
 import { AIAction } from '@/util/enums'
 import './UploadPDF.styles.css'
@@ -17,13 +18,20 @@ export const UploadPDF = () => {
   const [result, setResult] = useState<any>('')
   const [resultsArray, setResultsArray] = useState<any>([])
   const [progress, setProgress] = useState<number>(0)
+  const [pdfUrl, setPdfUrl] = useState<string>('')
+  console.log('pdfUrl', pdfUrl)
 
   const handleSubmit = async (route: string) => {
     const currentFile = selectedFiles?.[0]
 
-    if (!currentFile) return
+    // if (!currentFile) return
     const formData = new FormData()
-    formData.append('file', currentFile)
+    // const pdfUrl ='https://www.advantesco.com/assets/files/Antenna-Installation-Manual-General.pdf'
+    if (pdfUrl) {
+      formData.append('pdfUrl', pdfUrl)
+    } else {
+      formData.append('file', currentFile)
+    }
     formData.append('question', items)
 
     try {
@@ -83,6 +91,13 @@ export const UploadPDF = () => {
           onChange={(e) => setItems(e.target.value)}
         ></Textarea>
       </div>
+      <div className="mb-6">
+        <Input
+          placeholder="Enter a PDF URL"
+          value={pdfUrl}
+          onChange={(e) => setPdfUrl(e.target.value)}
+        ></Input>
+      </div>
       <Dropzone onDrop={onDrop} multiple={false} disabled={selectedFiles?.[0]}>
         {({ getRootProps, getInputProps }) => (
           <section className="w-full">
@@ -100,7 +115,7 @@ export const UploadPDF = () => {
               <div className="flex flex-col sm:flex-row items-center sm:space-x-4 w-full sm:w-auto">
                 <Button
                   className="w-full sm:w-auto mb-2 sm:mb-0 text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
-                  disabled={!selectedFiles}
+                  disabled={!pdfUrl}
                   onClick={() => handleSubmit(AIAction.RETRIEVAL)}
                 >
                   Analyze
