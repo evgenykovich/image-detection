@@ -31,16 +31,27 @@ export const translateWithGlossary = async (
   sourceLang: string,
   targetLang: string
 ) => {
-  if (!glossaryFilePath) {
-    throw new Error('Glossary file path is undefined')
-  }
-
-  const glossaryChunks = await loadAndChunkGlossary(glossaryFilePath)
-
   const model = new langChainOpenAI({
     temperature: 0,
     modelName: 'gpt-4o',
   })
+
+  if (!glossaryFilePath) {
+    const simplePromptTemplate = new PromptTemplate({
+      template: `Translate the following text from {sourceLang} to {targetLang}. Provide only the translation, without any additional text:
+
+{text}`,
+      inputVariables: ['sourceLang', 'targetLang', 'text'],
+    })
+
+    const simpleChain = new LLMChain({
+      llm: model,
+      prompt: simplePromptTemplate,
+    })
+    const result = await simpleChain.call({ sourceLang, targetLang, text })
+    return result.text.trim()
+  }
+  const glossaryChunks = await loadAndChunkGlossary(glossaryFilePath)
 
   const promptTemplate = new PromptTemplate({
     template: `You are a professional translator. Translate the following text from {sourceLang} to {targetLang}. 
