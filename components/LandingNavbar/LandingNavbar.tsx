@@ -19,6 +19,11 @@ export const LandingNavbar = () => {
           RAG
         </h1>
       </Link>
+      <Link href="/translations" className="flex items-center ml-4">
+        <h1 className={cn('text-2xl font-bold text-white', font.className)}>
+          Translations
+        </h1>
+      </Link>
     </nav>
   )
 }

@@ -10,6 +10,7 @@ export enum AIAction {
   DETECT = 'detect',
   MEASURMENTS = 'measurments',
   RETRIEVAL = 'retrieval',
+  TRANSLATE = 'translate',
 }
 
 export enum mimeType {
