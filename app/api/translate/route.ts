@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 import { translateWithGlossary } from '@/util/ai'
-import { z } from 'zod'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
+export const maxDuration = 300
 
 export async function POST(req: Request) {
   try {

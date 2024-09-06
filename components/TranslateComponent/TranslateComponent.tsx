@@ -82,7 +82,7 @@ export const TranslateComponent = () => {
         <Input
           type="file"
           accept=".xlsx"
-          className="bg-white"
+          className="bg-white text-black/80"
           onChange={(e) => setGlossaryFile(e.target.files?.[0] || null)}
         ></Input>
       </div>
