@@ -33,7 +33,7 @@ export const translateWithGlossary = async (
 ) => {
   const model = new langChainOpenAI({
     temperature: 0,
-    modelName: 'gpt-4o',
+    modelName: 'gpt-4o-mini',
   })
 
   if (!glossaryFilePath) {
@@ -169,7 +169,7 @@ export const qa = async (question: string, pdfBuffer: Buffer) => {
 
   const model = new langChainOpenAI({
     temperature: 0,
-    modelName: 'gpt-4o',
+    modelName: 'gpt-4o-mini',
   })
 
   const chain = loadQARefineChain(model)

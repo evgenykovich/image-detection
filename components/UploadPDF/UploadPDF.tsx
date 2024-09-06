@@ -22,8 +22,7 @@ export const UploadPDF = () => {
 
   const handleSubmit = async (route: string) => {
     const currentFile = selectedFiles?.[0]
-    const urlValid = validateUrl(pdfUrl)
-    if (!urlValid || !currentFile) return
+
     const formData = new FormData()
     // const pdfUrl ='https://www.advantesco.com/assets/files/Antenna-Installation-Manual-General.pdf'
     if (pdfUrl) {
