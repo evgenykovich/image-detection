@@ -66,11 +66,13 @@ export const TranslateComponent = () => {
       </div>
       <div className="flex mb-4 space-x-4">
         <Input
+          className="text-black/80"
           placeholder="Source Language"
           value={sourceLang}
           onChange={(e) => setSourceLang(e.target.value)}
         ></Input>
         <Input
+          className="text-black/80"
           placeholder="Target Language"
           value={targetLang}
           onChange={(e) => setTargetLang(e.target.value)}
