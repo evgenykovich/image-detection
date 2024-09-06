@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { translateWithGlossary } from '@/util/ai'
-import { z } from 'zod'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
