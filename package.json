@@ -29,6 +29,7 @@
     "react-dom": "^18",
     "react-dropzone": "^14.2.3",
     "tailwind-merge": "^2.3.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^3.23.8"
   },
   "devDependencies": {

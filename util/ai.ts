@@ -2,7 +2,11 @@ import { OpenAI } from 'openai'
 import { z } from 'zod'
 import AWS from 'aws-sdk'
 import pdf from 'pdf-parse'
+import * as xlsx from 'xlsx'
+import { promises as fs } from 'fs'
 import { OpenAI as langChainOpenAI } from 'langchain/llms/openai'
+import { LLMChain } from 'langchain/chains'
+import { PromptTemplate } from 'langchain/prompts'
 import { Document } from 'langchain/document'
 import { loadQARefineChain } from 'langchain/chains'
 import { OpenAIEmbeddings } from 'langchain/embeddings/openai'
@@ -20,6 +24,124 @@ AWS.config.update({
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   region: process.env.AWS_REGION,
 })
+
+export const translateWithGlossary = async (
+  text: string,
+  glossaryFilePath: string | undefined,
+  sourceLang: string,
+  targetLang: string
+) => {
+  if (!glossaryFilePath) {
+    throw new Error('Glossary file path is undefined')
+  }
+
+  const glossaryChunks = await loadAndChunkGlossary(glossaryFilePath)
+
+  const model = new langChainOpenAI({
+    temperature: 0,
+    modelName: 'gpt-4o',
+  })
+
+  const promptTemplate = new PromptTemplate({
+    template: `You are a professional translator. Translate the following text from {sourceLang} to {targetLang}. 
+    Use the provided glossary chunk for consistent terminology. Each line of the glossary contains all information about a term, separated by '|':
+
+    Glossary Chunk:
+    {glossaryChunk}
+
+    Text to translate:
+    {text}
+
+    Translation:`,
+    inputVariables: ['sourceLang', 'targetLang', 'glossaryChunk', 'text'],
+  })
+
+  const chain = new LLMChain({ llm: model, prompt: promptTemplate })
+
+  const translatedText = await translateWithChunkedGlossary(
+    text,
+    glossaryChunks,
+    chain,
+    {
+      sourceLang,
+      targetLang,
+    }
+  )
+
+  return translatedText
+}
+
+async function loadAndChunkGlossary(
+  glossaryFilePath: string
+): Promise<string[]> {
+  const fileContent = await fs.readFile(glossaryFilePath)
+  const workbook = xlsx.read(fileContent, { type: 'buffer' })
+  const sheetName = workbook.SheetNames[0]
+  const sheet = workbook.Sheets[sheetName]
+  const glossary = xlsx.utils.sheet_to_json(sheet)
+
+  if (!Array.isArray(glossary) || glossary.length === 0) {
+    console.error('Glossary is empty or not an array:', glossary)
+    throw new Error('Invalid glossary format')
+  }
+
+  const glossaryString = glossary
+    .map((entry: any) => {
+      const values = Object.values(entry)
+      if (values.length === 0) {
+        console.warn('Empty glossary entry:', entry)
+        return null
+      }
+      return values.join(' | ')
+    })
+    .filter(Boolean)
+    .join('\n')
+
+  if (glossaryString.length === 0) {
+    console.warn('Glossary string is empty')
+  }
+
+  return chunkGlossary(glossaryString)
+}
+
+function chunkGlossary(glossaryString: string): string[] {
+  const MAX_CHUNK_SIZE = 10000 // Adjust as needed
+  const lines = glossaryString.split('\n')
+  const chunks: string[] = []
+  let currentChunk = ''
+
+  for (const line of lines) {
+    if ((currentChunk + line + '\n').length > MAX_CHUNK_SIZE) {
+      if (currentChunk) chunks.push(currentChunk.trim())
+      currentChunk = line + '\n'
+    } else {
+      currentChunk += line + '\n'
+    }
+  }
+  if (currentChunk) chunks.push(currentChunk.trim())
+
+  return chunks
+}
+
+async function translateWithChunkedGlossary(
+  text: string,
+  glossaryChunks: string[],
+  chain: LLMChain,
+  params: { sourceLang: string; targetLang: string }
+): Promise<string> {
+  let translatedText = text
+
+  for (const glossaryChunk of glossaryChunks) {
+    const result = await chain.call({
+      ...params,
+      glossaryChunk,
+      text: translatedText,
+    })
+    translatedText = result.text
+  }
+
+  return translatedText
+}
 
 const extractTextFromPDF = async (pdfBuffer: Buffer): Promise<string> => {
   const data = await pdf(pdfBuffer)
