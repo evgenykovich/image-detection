@@ -3,8 +3,18 @@ import { translateWithGlossary } from '@/util/ai'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
+
+/**
+ * Maximum duration for the API route execution in seconds.
+ */
 export const maxDuration = 300
 
+/**
+ * Handles POST requests for translating text with an optional glossary.
+ *
+ * @param {Request} req - The incoming HTTP request object.
+ * @returns {Promise<NextResponse>} A promise that resolves to a NextResponse object.
+ */
 export async function POST(req: Request) {
   try {
     const formData = await req.formData()
@@ -25,12 +35,15 @@ export async function POST(req: Request) {
       const bytes = await glossaryFile.arrayBuffer()
       const buffer = Buffer.from(bytes)
 
-      // Create a temporary file
       const tempFilePath = join(tmpdir(), `glossary-${Date.now()}.xlsx`)
       await writeFile(tempFilePath, buffer)
       glossaryFilePath = tempFilePath
     }
 
+    /**
+     * Translates the text using the provided glossary and language settings.
+     * @type {string}
+     */
     const translatedText = await translateWithGlossary(
       text,
       glossaryFilePath,

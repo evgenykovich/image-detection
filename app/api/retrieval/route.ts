@@ -1,30 +1,18 @@
 import { NextResponse } from 'next/server'
 import { qa } from '@/util/ai'
+import { getPdfBuffer } from '@/util/helpers'
 
-const getPdfBuffer = async (
-  file: File | null,
-  pdfUrl: string | null
-): Promise<Buffer> => {
-  if (file) {
-    return Buffer.from(await file.arrayBuffer())
-  }
-
-  if (pdfUrl) {
-    const response = await fetch(pdfUrl)
-    if (!response.ok) {
-      throw new Error('Failed to fetch PDF from URL')
-    }
-    return Buffer.from(await response.arrayBuffer())
-  }
-
-  throw new Error('No file or URL provided')
-}
-
-export const POST = async (request: any) => {
+/**
+ * Handles POST requests for retrieving answers from a PDF document.
+ *
+ * @param {Request} request - The incoming HTTP request object.
+ * @returns {Promise<NextResponse>} A promise that resolves to a NextResponse object.
+ */
+export const POST = async (request: Request) => {
   const formData = await request.formData()
-  const file = formData.get('file')
-  const question = formData.get('question')
-  const pdfUrl = formData.get('pdfUrl')
+  const file = formData.get('file') as File | null
+  const question = formData.get('question') as string
+  const pdfUrl = formData.get('pdfUrl') as string | null
 
   if (!question || (!file && !pdfUrl)) {
     return new NextResponse(JSON.stringify({ error: 'Invalid request' }), {
@@ -35,6 +23,9 @@ export const POST = async (request: any) => {
   let pdfBuffer: Buffer
 
   try {
+    /**
+     * Retrieves the PDF buffer from either the uploaded file or the provided URL.
+     */
     pdfBuffer = await getPdfBuffer(file, pdfUrl)
   } catch (error) {
     return new NextResponse(
@@ -47,6 +38,9 @@ export const POST = async (request: any) => {
     )
   }
 
+  /**
+   * Processes the question and PDF buffer to generate an answer.
+   */
   const answer = await qa(question, pdfBuffer)
 
   return new NextResponse(JSON.stringify({ answer }), {

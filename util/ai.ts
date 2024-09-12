@@ -1,3 +1,9 @@
+/**
+ * @file AI Utility Functions
+ * @module util/ai
+ * @description This file contains utility functions for various AI-related tasks, including translation, question answering, image analysis, and more.
+ */
+
 import { OpenAI } from 'openai'
 import { z } from 'zod'
 import AWS from 'aws-sdk'
@@ -25,6 +31,37 @@ AWS.config.update({
   region: process.env.AWS_REGION,
 })
 
+/**
+ * @typedef {Object} FieldValue
+ * @property {string} field - The name of the field
+ * @property {string} value - The value of the field
+ */
+
+/**
+ * Zod schema for validating field-value pairs
+ * @type {z.ZodObject<{field: z.ZodString, value: z.ZodString}>}
+ */
+const FieldValueSchema = z.object({
+  field: z.string(),
+  value: z.string(),
+})
+
+/**
+ * Zod schema for validating an array of field-value pairs
+ * @type {z.ZodArray<z.ZodObject<{field: z.ZodString, value: z.ZodString}>>}
+ */
+const FieldValuesArraySchema = z.array(FieldValueSchema)
+
+/**
+ * Translates text using a glossary if provided.
+ * @async
+ * @function translateWithGlossary
+ * @param {string} text - The text to translate.
+ * @param {string | undefined} glossaryFilePath - Path to the glossary file.
+ * @param {string} sourceLang - The source language.
+ * @param {string} targetLang - The target language.
+ * @returns {Promise<string>} - The translated text.
+ */
 export const translateWithGlossary = async (
   text: string,
   glossaryFilePath: string | undefined,
@@ -82,6 +119,13 @@ export const translateWithGlossary = async (
   return translatedText
 }
 
+/**
+ * Loads and chunks the glossary from a file.
+ * @async
+ * @function loadAndChunkGlossary
+ * @param {string} glossaryFilePath - Path to the glossary file.
+ * @returns {Promise<string[]>} - An array of glossary chunks.
+ */
 async function loadAndChunkGlossary(
   glossaryFilePath: string
 ): Promise<string[]> {
@@ -97,8 +141,8 @@ async function loadAndChunkGlossary(
   }
 
   const glossaryString = glossary
-    .map((entry: any) => {
-      const values = Object.values(entry)
+    .map((entry) => {
+      const values = Object.values(entry as Record<string, unknown>)
       if (values.length === 0) {
         console.warn('Empty glossary entry:', entry)
         return null
@@ -115,6 +159,12 @@ async function loadAndChunkGlossary(
   return chunkGlossary(glossaryString)
 }
 
+/**
+ * Chunks the glossary string into smaller parts.
+ * @function chunkGlossary
+ * @param {string} glossaryString - The glossary string to chunk.
+ * @returns {string[]} - An array of chunks.
+ */
 function chunkGlossary(glossaryString: string): string[] {
   const MAX_CHUNK_SIZE = 10000 // Adjust as needed
   const lines = glossaryString.split('\n')
@@ -134,6 +184,16 @@ function chunkGlossary(glossaryString: string): string[] {
   return chunks
 }
 
+/**
+ * Translates text using chunked glossary.
+ * @async
+ * @function translateWithChunkedGlossary
+ * @param {string} text - The text to translate.
+ * @param {string[]} glossaryChunks - The glossary chunks.
+ * @param {LLMChain} chain - The LLM chain for translation.
+ * @param {{ sourceLang: string; targetLang: string }} params - Language parameters.
+ * @returns {Promise<string>} - The translated text.
+ */
 async function translateWithChunkedGlossary(
   text: string,
   glossaryChunks: string[],
@@ -154,11 +214,26 @@ async function translateWithChunkedGlossary(
   return translatedText
 }
 
+/**
+ * Extracts text from a PDF buffer.
+ * @async
+ * @function extractTextFromPDF
+ * @param {Buffer} pdfBuffer - The PDF buffer.
+ * @returns {Promise<string>} - The extracted text.
+ */
 const extractTextFromPDF = async (pdfBuffer: Buffer): Promise<string> => {
   const data = await pdf(pdfBuffer)
   return data.text
 }
 
+/**
+ * Performs a question-answering operation on a PDF.
+ * @async
+ * @function qa
+ * @param {string} question - The question to ask.
+ * @param {Buffer} pdfBuffer - The PDF buffer.
+ * @returns {Promise<string>} - The answer to the question.
+ */
 export const qa = async (question: string, pdfBuffer: Buffer) => {
   const content = await extractTextFromPDF(pdfBuffer)
 
@@ -184,13 +259,14 @@ export const qa = async (question: string, pdfBuffer: Buffer) => {
   return res.output_text
 }
 
-const FieldValueSchema = z.object({
-  field: z.string(),
-  value: z.string(),
-})
-
-const FieldValuesArraySchema = z.array(FieldValueSchema)
-
+/**
+ * Extracts values from fields in an image.
+ * @async
+ * @function getValueFromFieldsInImage
+ * @param {string} imageBase64 - The base64 encoded image.
+ * @param {string[]} fields - The fields to extract.
+ * @returns {Promise<FieldValue[]>} - The extracted values.
+ */
 export const getValueFromFieldsInImage = async (
   imageBase64: string,
   fields: string[]
@@ -229,6 +305,14 @@ export const getValueFromFieldsInImage = async (
   }
 }
 
+/**
+ * Detects items in an image.
+ * @async
+ * @function detect
+ * @param {string} imageBase64 - The base64 encoded image.
+ * @param {string[]} items - The items to detect.
+ * @returns {Promise<string>} - The detection result.
+ */
 export const detect = async (imageBase64: string, items: string[]) => {
   const model = new langChainOpenAI({
     modelName: 'gpt-4o',
@@ -255,6 +339,14 @@ export const detect = async (imageBase64: string, items: string[]) => {
   return response
 }
 
+/**
+ * Provides rough measurements of items in an image.
+ * @async
+ * @function measurments
+ * @param {string} imageBase64 - The base64 encoded image.
+ * @param {string[]} items - The items to measure.
+ * @returns {Promise<any>} - The measurement results.
+ */
 export const measurments = async (imageBase64: string, items: string[]) => {
   const openai = new OpenAI()
 
@@ -285,6 +377,15 @@ export const measurments = async (imageBase64: string, items: string[]) => {
   return response.choices[0]
 }
 
+/**
+ * Detects items in an image using Gemini AI.
+ * @async
+ * @function geminiDetectImage
+ * @param {string} imageBase64 - The base64 encoded image.
+ * @param {AIAction} action - The action to perform (detect or measure).
+ * @param {string[]} items - The items to detect or measure.
+ * @returns {Promise<string>} - The detection result.
+ */
 export const geminiDetectImage = async (
   imageBase64: string,
   action = AIAction.DETECT,
@@ -326,6 +427,15 @@ export const geminiDetectImage = async (
   }
 }
 
+/**
+ * Detects items in an image using Claude AI.
+ * @async
+ * @function claudeDetectImage
+ * @param {string} imageBase64 - The base64 encoded image.
+ * @param {AIAction} action - The action to perform (detect or measure).
+ * @param {string[]} items - The items to detect or measure.
+ * @returns {Promise<string>} - The detection result.
+ */
 export const claudeDetectImage = async (
   imageBase64: string,
   action = AIAction.DETECT,
@@ -376,7 +486,12 @@ export const claudeDetectImage = async (
     console.error('Error initializing Claude', error)
   }
 }
-
+/**
+ * Detects items in an image using AWS Rekognition.
+ * @param {string} imageBase64 - The base64 encoded image.
+ * @param {string[]} items - The items to detect.
+ * @returns {Promise<string | undefined>} - The detected items.
+ */
 export const awsRekognitionDetectImage = async (
   imageBase64: string,
   items: string[]

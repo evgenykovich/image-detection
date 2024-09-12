@@ -7,7 +7,13 @@ import {
 } from '@/util/ai'
 import { AIAction, AISelectorEnum } from '@/util/enums'
 
-export const POST = async (request: any) => {
+/**
+ * Handles POST requests for detecting items in an image using various AI services.
+ *
+ * @param {Request} request - The incoming HTTP request object.
+ * @returns {Promise<NextResponse>} A promise that resolves to a NextResponse object.
+ */
+export const POST = async (request: Request) => {
   const body = await request.json()
   const { image, items, aiToUse } = body
 
@@ -16,6 +22,10 @@ export const POST = async (request: any) => {
       status: 400,
     })
   }
+
+  /**
+   * Object mapping AI services to their respective detection functions.
+   */
   const detectFunctions = {
     [AISelectorEnum.OPEN_AI]: detect,
     [AISelectorEnum.GEMINI]: (image: string, items: string[]) =>
