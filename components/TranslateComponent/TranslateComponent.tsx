@@ -4,13 +4,22 @@ import React, { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
-import { AIAction } from '@/util/enums'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { AIAction, Languages } from '@/util/enums'
 import { ProgressBar } from 'primereact/progressbar'
 
 export const TranslateComponent = () => {
   const [inputText, setInputText] = useState('')
   const [sourceLang, setSourceLang] = useState('English')
-  const [targetLang, setTargetLang] = useState('Spanish')
+  const [targetLang, setTargetLang] = useState('es')
   const [translatedText, setTranslatedText] = useState('')
   const [progress, setProgress] = useState<number>(0)
   const [glossaryFile, setGlossaryFile] = useState<File | null>(null)
@@ -48,6 +57,10 @@ export const TranslateComponent = () => {
     setGlossaryFile(null)
   }
 
+  const handleLanguageSelect = (value: string) => {
+    setTargetLang(value)
+  }
+
   return (
     <div>
       {progress !== 0 && (
@@ -71,12 +84,25 @@ export const TranslateComponent = () => {
           value={sourceLang}
           onChange={(e) => setSourceLang(e.target.value)}
         ></Input>
-        <Input
-          className="text-black/80"
-          placeholder="Target Language"
-          value={targetLang}
-          onChange={(e) => setTargetLang(e.target.value)}
-        ></Input>
+        <Select
+          onValueChange={(value) => handleLanguageSelect(value)}
+          defaultValue={targetLang}
+        >
+          <SelectTrigger className="min-w-[180px] text-black/80 bg-white">
+            <SelectValue placeholder="Target language" />
+          </SelectTrigger>
+          <SelectContent className="text-black/80 bg-white">
+            <SelectGroup>
+              {Object.entries(Languages).map(([key, value]) => {
+                return (
+                  <SelectItem key={key} value={key}>
+                    {value}
+                  </SelectItem>
+                )
+              })}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
       </div>
       <div className="mb-6">
         <Input

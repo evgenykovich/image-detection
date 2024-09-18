@@ -14,7 +14,7 @@ import { MemoryVectorStore } from 'langchain/vectorstores/memory'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import Anthropic from '@anthropic-ai/sdk'
 import { AIAction, mimeType } from './enums'
-import { base64Helper } from './helpers'
+import { base64Helper, findTranslation, mapColumnToLang } from './helpers'
 
 const googleAPIKey = process.env.GOOGLE_AI_API_KEY
 const claudeAPIKey = process.env.CLAUDE_API_KEY
@@ -25,133 +25,116 @@ AWS.config.update({
   region: process.env.AWS_REGION,
 })
 
+interface GlossaryEntryItem {
+  [key: string]: {
+    [lang: string]: string
+  }
+}
+
+/**
+ * Loads the glossary from an Excel file.
+ * @async
+ * @function loadGlossary
+ * @param {string} glossaryFilePath - The path to the glossary file.
+ * @returns {Promise<GlossaryEntryItem>} - A promise that resolves to an object representing the glossary.
+ */
+const loadGlossary = async (
+  glossaryFilePath: string
+): Promise<GlossaryEntryItem> => {
+  const fileContent = await fs.readFile(glossaryFilePath)
+  const workbook = xlsx.read(fileContent, { type: 'buffer' })
+  const sheetName = workbook.SheetNames[0]
+  const sheet = workbook.Sheets[sheetName]
+  const rawData = xlsx.utils.sheet_to_json(sheet)
+
+  const glossary: GlossaryEntryItem = {}
+
+  rawData.forEach((row: any) => {
+    const term = row['Column1']
+    if (!term) return
+
+    glossary[term] = {}
+
+    Object.keys(row).forEach((key) => {
+      if (key !== 'Column1') {
+        const lang = mapColumnToLang(key)
+        glossary[term][lang] = row[key] || ''
+      }
+    })
+  })
+
+  return glossary
+}
+
+/**
+ * Translates text using a glossary if provided.
+ * @async
+ * @function translateWithGlossary
+ * @param {string} text - The text to translate.
+ * @param {string | undefined} glossaryFilePath - The path to the glossary file.
+ * @param {string} sourceLang - The source language.
+ * @param {string} targetLang - The target language.
+ * @returns {Promise<string>} - A promise that resolves to the translated text.
+ */
 export const translateWithGlossary = async (
   text: string,
   glossaryFilePath: string | undefined,
   sourceLang: string,
   targetLang: string
-) => {
+): Promise<string> => {
   const model = new langChainOpenAI({
     temperature: 0,
     modelName: 'gpt-4o-mini',
+    openAIApiKey: process.env.OPENAI_API_KEY,
   })
 
-  if (!glossaryFilePath) {
-    const simplePromptTemplate = new PromptTemplate({
-      template: `Translate the following text from {sourceLang} to {targetLang}. Provide only the translation, without any additional text:
+  let modifiedText = text
+  let promptTemplate: PromptTemplate
+  if (glossaryFilePath) {
+    const glossary = await loadGlossary(glossaryFilePath)
+    const pattern = Object.keys(glossary)
+      .sort((a, b) => b.length - a.length)
+      .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|')
+    const regex = new RegExp(`\\b(${pattern})s?\\b`, 'gi')
 
-{text}`,
+    modifiedText = text.replace(regex, (match) => {
+      const term = match.replace(/s$/, '')
+      const translation = findTranslation(glossary as any, targetLang, term)
+      if (translation) {
+        return match.endsWith('s') && !translation.endsWith('s')
+          ? translation + 's'
+          : translation
+      }
+      return match
+    })
+
+    promptTemplate = new PromptTemplate({
+      template: `Translate the following text from {sourceLang} to {targetLang}. Provide only the translation, without any additional text:
+      
+      {text}`,
       inputVariables: ['sourceLang', 'targetLang', 'text'],
     })
-
-    const simpleChain = new LLMChain({
-      llm: model,
-      prompt: simplePromptTemplate,
+  } else {
+    promptTemplate = new PromptTemplate({
+      template: `Translate the following text literally from {sourceLang} to {targetLang}. Provide only the translation, without any additional text:
+      
+      {text}`,
+      inputVariables: ['sourceLang', 'targetLang', 'text'],
     })
-    const result = await simpleChain.call({ sourceLang, targetLang, text })
-    return result.text.trim()
   }
-  const glossaryChunks = await loadAndChunkGlossary(glossaryFilePath)
 
-  const promptTemplate = new PromptTemplate({
-    template: `You are a professional translator. Translate the following text from {sourceLang} to {targetLang}. 
-    Use the provided glossary chunk for consistent terminology. Each line of the glossary contains all information about a term, separated by '|':
-
-    Glossary Chunk:
-    {glossaryChunk}
-
-    Text to translate:
-    {text}
-
-    Translation:`,
-    inputVariables: ['sourceLang', 'targetLang', 'glossaryChunk', 'text'],
+  const chain = new LLMChain({
+    llm: model,
+    prompt: promptTemplate,
   })
 
-  const chain = new LLMChain({ llm: model, prompt: promptTemplate })
-
-  const translatedText = await translateWithChunkedGlossary(
-    text,
-    glossaryChunks,
-    chain,
-    {
-      sourceLang,
-      targetLang,
-    }
-  )
-
-  return translatedText
-}
-
-async function loadAndChunkGlossary(
-  glossaryFilePath: string
-): Promise<string[]> {
-  const fileContent = await fs.readFile(glossaryFilePath)
-  const workbook = xlsx.read(fileContent, { type: 'buffer' })
-  const sheetName = workbook.SheetNames[0]
-  const sheet = workbook.Sheets[sheetName]
-  const glossary = xlsx.utils.sheet_to_json(sheet)
-
-  if (!Array.isArray(glossary) || glossary.length === 0) {
-    console.error('Glossary is empty or not an array:', glossary)
-    throw new Error('Invalid glossary format')
-  }
-
-  const glossaryString = glossary
-    .map((entry: any) => {
-      const values = Object.values(entry)
-      if (values.length === 0) {
-        console.warn('Empty glossary entry:', entry)
-        return null
-      }
-      return values.join(' | ')
-    })
-    .filter(Boolean)
-    .join('\n')
-
-  if (glossaryString.length === 0) {
-    console.warn('Glossary string is empty')
-  }
-
-  return chunkGlossary(glossaryString)
-}
-
-function chunkGlossary(glossaryString: string): string[] {
-  const MAX_CHUNK_SIZE = 10000 // Adjust as needed
-  const lines = glossaryString.split('\n')
-  const chunks: string[] = []
-  let currentChunk = ''
-
-  for (const line of lines) {
-    if ((currentChunk + line + '\n').length > MAX_CHUNK_SIZE) {
-      if (currentChunk) chunks.push(currentChunk.trim())
-      currentChunk = line + '\n'
-    } else {
-      currentChunk += line + '\n'
-    }
-  }
-  if (currentChunk) chunks.push(currentChunk.trim())
-
-  return chunks
-}
-
-async function translateWithChunkedGlossary(
-  text: string,
-  glossaryChunks: string[],
-  chain: LLMChain,
-  params: { sourceLang: string; targetLang: string }
-): Promise<string> {
-  let translatedText = text
-
-  for (const glossaryChunk of glossaryChunks) {
-    const result = await chain.call({
-      ...params,
-      glossaryChunk,
-      text: translatedText,
-    })
-    translatedText = result.text
-  }
-
-  return translatedText
+  const result = await chain.call({
+    sourceLang,
+    targetLang,
+    text: modifiedText,
+  })
+  return result.text.trim()
 }
 
 const extractTextFromPDF = async (pdfBuffer: Buffer): Promise<string> => {
