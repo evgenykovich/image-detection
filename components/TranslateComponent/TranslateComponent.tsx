@@ -18,7 +18,7 @@ import { ProgressBar } from 'primereact/progressbar'
 
 export const TranslateComponent = () => {
   const [inputText, setInputText] = useState('')
-  const [sourceLang, setSourceLang] = useState('English')
+  const [sourceLang, setSourceLang] = useState('en')
   const [targetLang, setTargetLang] = useState('es')
   const [translatedText, setTranslatedText] = useState('')
   const [progress, setProgress] = useState<number>(0)
@@ -57,8 +57,12 @@ export const TranslateComponent = () => {
     setGlossaryFile(null)
   }
 
-  const handleLanguageSelect = (value: string) => {
+  const handleTargetLanguageSelect = (value: string) => {
     setTargetLang(value)
+  }
+
+  const handleSourceLanguageSelect = (value: string) => {
+    setSourceLang(value)
   }
 
   return (
@@ -78,14 +82,27 @@ export const TranslateComponent = () => {
         ></Textarea>
       </div>
       <div className="flex mb-4 space-x-4">
-        <Input
-          className="text-black/80"
-          placeholder="Source Language"
-          value={sourceLang}
-          onChange={(e) => setSourceLang(e.target.value)}
-        ></Input>
         <Select
-          onValueChange={(value) => handleLanguageSelect(value)}
+          onValueChange={(value) => handleSourceLanguageSelect(value)}
+          defaultValue={sourceLang}
+        >
+          <SelectTrigger className="min-w-[180px] text-black/80 bg-white">
+            <SelectValue placeholder="Source language" />
+          </SelectTrigger>
+          <SelectContent className="text-black/80 bg-white">
+            <SelectGroup>
+              {Object.entries(Languages).map(([key, value]) => {
+                return (
+                  <SelectItem key={key} value={key}>
+                    {value}
+                  </SelectItem>
+                )
+              })}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <Select
+          onValueChange={(value) => handleTargetLanguageSelect(value)}
           defaultValue={targetLang}
         >
           <SelectTrigger className="min-w-[180px] text-black/80 bg-white">
