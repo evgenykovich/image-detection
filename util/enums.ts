@@ -34,4 +34,5 @@ export enum Languages {
   zh_TW = 'Chinese Traditional',
   zh_CN = 'Chinese Simplified',
   en_US = 'English US',
+  en = 'English',
 }
