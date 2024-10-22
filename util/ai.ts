@@ -3,6 +3,7 @@ import { z } from 'zod'
 import AWS from 'aws-sdk'
 import pdf from 'pdf-parse'
 import * as xlsx from 'xlsx'
+import Sharp from 'sharp'
 import { promises as fs } from 'fs'
 import { OpenAI as langChainOpenAI } from 'langchain/llms/openai'
 import { LLMChain } from 'langchain/chains'
@@ -14,7 +15,12 @@ import { MemoryVectorStore } from 'langchain/vectorstores/memory'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import Anthropic from '@anthropic-ai/sdk'
 import { AIAction, mimeType } from './enums'
-import { base64Helper, findTranslation, mapColumnToLang } from './helpers'
+import {
+  base64Helper,
+  blurFaceInImage,
+  findTranslation,
+  mapColumnToLang,
+} from './helpers'
 
 const googleAPIKey = process.env.GOOGLE_AI_API_KEY
 const claudeAPIKey = process.env.CLAUDE_API_KEY
@@ -32,31 +38,62 @@ interface GlossaryEntryItem {
 }
 
 export const detectFacesFromImageOpenAI = async (imageBase64: string) => {
-  const model = new langChainOpenAI({
-    modelName: 'gpt-4o',
-    temperature: 0,
-  })
+  const rekognition = new AWS.Rekognition()
 
-  const prompt = `Detect all faces in the image. For each face, provide the coordinates of the bounding box in the format [x, y, width, height], where:
-- (x, y) is the top-left corner of the face.
-- width and height represent the dimensions of the face.
+  const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')
+  const imageBuffer = Buffer.from(base64Data, 'base64')
 
-Return the results as an array of bounding boxes.`
-
-  const response = await model.call([
-    {
-      type: 'text',
-      text: prompt,
+  const params = {
+    Image: {
+      Bytes: imageBuffer,
     },
-    {
-      type: 'image_url',
-      image_url: {
-        url: imageBase64,
-      },
-    },
-  ] as any)
+    Attributes: ['ALL'],
+  }
 
-  return response
+  try {
+    const response = await rekognition.detectFaces(params).promise()
+
+    if (response.FaceDetails && response.FaceDetails.length > 0) {
+      const image = Sharp(imageBuffer)
+      const metadata = await image.metadata()
+
+      if (!metadata.width || !metadata.height) {
+        throw new Error('Unable to get image dimensions')
+      }
+
+      const faces = response.FaceDetails.map((face) => {
+        if (face.BoundingBox) {
+          const { Width, Height, Left, Top } = face.BoundingBox
+          return {
+            boundingBox: {
+              left: Math.max(
+                0,
+                Math.round((Left || 0) * (metadata.width || 0))
+              ),
+              top: Math.max(0, Math.round((Top || 0) * (metadata.height || 0))),
+              width: Math.min(
+                metadata.width || 0,
+                Math.round((Width || 0) * (metadata.width || 0))
+              ),
+              height: Math.min(
+                metadata.height || 0,
+                Math.round((Height || 0) * (metadata.height || 0))
+              ),
+            },
+          }
+        }
+        return null
+      }).filter((face) => face !== null)
+
+      const blurredImageBase64 = await blurFaceInImage(imageBase64, faces)
+      return blurredImageBase64
+    }
+
+    return imageBase64
+  } catch (error) {
+    console.error('Error detecting faces:', error)
+    throw error
+  }
 }
 
 /**
