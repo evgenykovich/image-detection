@@ -2,8 +2,6 @@
 
 import React, { useState } from 'react'
 import { useAtomValue } from 'jotai'
-import Image from 'next/image'
-import Dropzone from 'react-dropzone'
 import { ProgressBar } from 'primereact/progressbar'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -11,6 +9,7 @@ import { aiInUse } from '@/store'
 import { handleAPICall, handleAllAIAPICall } from '@/util/api'
 import { AIAction, AISelectorEnum } from '@/util/enums'
 import './UploadFiles.styles.css'
+import { DropZoneUpload } from '../DropZoneUpload'
 
 const aiMapper = {
   0: AISelectorEnum.OPEN_AI,
@@ -177,42 +176,14 @@ export const UploadFiles = () => {
           onChange={(e) => setItems(e.target.value)}
         ></Textarea>
       </div>
-      <Dropzone onDrop={onDrop} multiple={false} disabled={selectedFiles?.[0]}>
-        {({ getRootProps, getInputProps }) => (
-          <section className="w-full">
-            <div {...getRootProps({ className: 'dropzone' })}>
-              <input {...getInputProps()} />
-              {preview ? (
-                <div className="selected-file">
-                  <Image height={350} width={350} src={preview} alt="Image" />
-                </div>
-              ) : (
-                'Drag and drop file here, or click to select file'
-              )}
-            </div>
-            <aside className="flex flex-col sm:flex-row items-center justify-between w-full">
-              <div className="flex flex-col sm:flex-row items-center sm:space-x-4 w-full sm:w-auto">
-                <Button
-                  className="w-full sm:w-auto mb-2 sm:mb-0 text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
-                  disabled={!selectedFiles}
-                  onClick={() => handleSubmit(AIAction.DETECT)}
-                >
-                  Detect
-                </Button>
-                {renderGetMeasurments()}
-              </div>
-              {selectedFiles && selectedFiles.length > 0 && (
-                <Button
-                  className="w-full sm:w-auto text-white bg-red-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg mt-2 sm:mt-0"
-                  onClick={handleClear}
-                >
-                  Clear
-                </Button>
-              )}
-            </aside>
-          </section>
-        )}
-      </Dropzone>
+      <DropZoneUpload
+        onDrop={onDrop}
+        selectedFiles={selectedFiles}
+        preview={preview}
+        handleSubmit={handleSubmit}
+        handleClear={handleClear}
+        renderGetMeasurments={renderGetMeasurments}
+      />
       <div className="mt-3">
         {result && (
           <div className="text-white">

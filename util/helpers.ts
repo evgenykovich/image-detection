@@ -78,20 +78,77 @@ export const mapLanguageToString = (columnKey: string): string => {
   return reverseMapping ? reverseMapping[0] : columnKey
 }
 
-export const blurFaceInImage = async (imagePath: string, faces: any) => {
+export const blurFaceInImage = async (imageBase64: string, faces: any[]) => {
   if (!Sharp) {
     throw new Error('Sharp is not available on the client side')
   }
-  let image = Sharp(imagePath)
 
-  for (const face of faces) {
-    const { left, top, width, height } = face.boundingBox
-    image = image.blur(30).extract({
-      left: Math.round(left),
-      top: Math.round(top),
-      width: Math.round(width),
-      height: Math.round(height),
-    })
+  const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')
+  const buffer = Buffer.from(base64Data, 'base64')
+  let image = Sharp(buffer)
+
+  try {
+    const { width, height } = await image.metadata()
+
+    if (!width || !height) {
+      throw new Error('Unable to get image dimensions')
+    }
+
+    const compositeOperations = await Promise.all(
+      faces.map(async (face) => {
+        const {
+          left,
+          top,
+          width: faceWidth,
+          height: faceHeight,
+        } = face.boundingBox
+
+        const safeLeft = Math.max(0, Math.min(width - 1, Math.round(left)))
+        const safeTop = Math.max(0, Math.min(height - 1, Math.round(top)))
+        const safeWidth = Math.min(width - safeLeft, Math.round(faceWidth))
+        const safeHeight = Math.min(height - safeTop, Math.round(faceHeight))
+
+        if (safeWidth <= 0 || safeHeight <= 0) {
+          console.warn('Skipping face due to invalid dimensions', {
+            left,
+            top,
+            width: faceWidth,
+            height: faceHeight,
+          })
+          return null
+        }
+
+        const blurredFace = await Sharp(buffer)
+          .extract({
+            left: safeLeft,
+            top: safeTop,
+            width: safeWidth,
+            height: safeHeight,
+          })
+          .blur(30)
+          .toBuffer()
+
+        return {
+          input: blurredFace,
+          left: safeLeft,
+          top: safeTop,
+        }
+      })
+    )
+
+    const validOperations = compositeOperations.filter((op) => op !== null)
+
+    if (validOperations.length > 0) {
+      image = image.composite(validOperations)
+    } else {
+      console.warn('No valid faces to blur')
+    }
+
+    const outputBuffer = await image.toBuffer()
+
+    return `data:image/jpeg;base64,${outputBuffer.toString('base64')}`
+  } catch (error) {
+    console.error('Error during face blurring:', error)
+    throw error
   }
-  return image.toBuffer()
 }

@@ -24,6 +24,11 @@ export const LandingNavbar = () => {
           Translations
         </h1>
       </Link>
+      <Link href="/gdpr" className="flex items-center ml-4">
+        <h1 className={cn('text-2xl font-bold text-white', font.className)}>
+          GDPR
+        </h1>
+      </Link>
     </nav>
   )
 }
