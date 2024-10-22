@@ -31,6 +31,34 @@ interface GlossaryEntryItem {
   }
 }
 
+export const detectFacesFromImageOpenAI = async (imageBase64: string) => {
+  const model = new langChainOpenAI({
+    modelName: 'gpt-4o',
+    temperature: 0,
+  })
+
+  const prompt = `Detect all faces in the image. For each face, provide the coordinates of the bounding box in the format [x, y, width, height], where:
+- (x, y) is the top-left corner of the face.
+- width and height represent the dimensions of the face.
+
+Return the results as an array of bounding boxes.`
+
+  const response = await model.call([
+    {
+      type: 'text',
+      text: prompt,
+    },
+    {
+      type: 'image_url',
+      image_url: {
+        url: imageBase64,
+      },
+    },
+  ] as any)
+
+  return response
+}
+
 /**
  * Loads the glossary from an Excel file.
  * @async
