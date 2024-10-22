@@ -1,5 +1,5 @@
+import sharp from 'sharp'
 import { Languages } from './enums'
-
 export const base64Helper = (imageBase64: string) => {
   const prefix = 'data:image/jpeg;base64,'
   return imageBase64.startsWith(prefix)
@@ -68,4 +68,20 @@ export const mapLanguageToString = (columnKey: string): string => {
     ([_, value]) => value === columnKey
   )
   return reverseMapping ? reverseMapping[0] : columnKey
+}
+
+export const blurFaceInImage = async (imagePath: string, faces: any) => {
+  let image = sharp(imagePath)
+  const metadata = await image.metadata()
+
+  for (const face of faces) {
+    const { left, top, width, height } = face.boundingBox
+    image = image.blur(30).extract({
+      left: Math.round(left),
+      top: Math.round(top),
+      width: Math.round(width),
+      height: Math.round(height),
+    })
+  }
+  return image.toBuffer()
 }
