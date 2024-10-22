@@ -83,7 +83,6 @@ export const blurFaceInImage = async (imagePath: string, faces: any) => {
     throw new Error('Sharp is not available on the client side')
   }
   let image = Sharp(imagePath)
-  const metadata = await image.metadata()
 
   for (const face of faces) {
     const { left, top, width, height } = face.boundingBox
