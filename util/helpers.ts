@@ -1,5 +1,13 @@
-import sharp from 'sharp'
 import { Languages } from './enums'
+
+let Sharp: any
+
+if (typeof window === 'undefined') {
+  Sharp = require('sharp')
+} else {
+  Sharp = null
+}
+
 export const base64Helper = (imageBase64: string) => {
   const prefix = 'data:image/jpeg;base64,'
   return imageBase64.startsWith(prefix)
@@ -71,7 +79,10 @@ export const mapLanguageToString = (columnKey: string): string => {
 }
 
 export const blurFaceInImage = async (imagePath: string, faces: any) => {
-  let image = sharp(imagePath)
+  if (!Sharp) {
+    throw new Error('Sharp is not available on the client side')
+  }
+  let image = Sharp(imagePath)
   const metadata = await image.metadata()
 
   for (const face of faces) {
