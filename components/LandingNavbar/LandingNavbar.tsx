@@ -29,6 +29,11 @@ export const LandingNavbar = () => {
           GDPR
         </h1>
       </Link>
+      <Link href="/validation-tool" className="flex items-center ml-4">
+        <h1 className={cn('text-2xl font-bold text-white', font.className)}>
+          Validation Tool
+        </h1>
+      </Link>
     </nav>
   )
 }

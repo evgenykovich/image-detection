@@ -10,12 +10,20 @@ import { handleAPICall, handleAllAIAPICall } from '@/util/api'
 import { AIAction, AISelectorEnum } from '@/util/enums'
 import './UploadFiles.styles.css'
 import { DropZoneUpload } from '../DropZoneUpload'
+import XLSX from 'xlsx'
 
 const aiMapper = {
   0: AISelectorEnum.OPEN_AI,
   1: AISelectorEnum.GEMINI,
   2: AISelectorEnum.CLAUDE,
   3: AISelectorEnum.AWS_REKOGNITION,
+}
+
+interface AnalysisResult {
+  filename: string
+  expectedCategory: string // 'good' or 'bad'
+  detectedResult: string
+  isCorrect: boolean
 }
 
 export const UploadFiles = () => {
@@ -27,6 +35,8 @@ export const UploadFiles = () => {
   const [resultsArray, setResultsArray] = useState<any>([])
   const [measurmentsArray, setMeasurmentsArray] = useState<any>([])
   const [progress, setProgress] = useState<number>(0)
+  const [folderResults, setFolderResults] = useState<AnalysisResult[]>([])
+  const [isFolderProcessing, setIsFolderProcessing] = useState(false)
 
   const useAI = useAtomValue(aiInUse)
 
@@ -122,11 +132,112 @@ export const UploadFiles = () => {
     }
   }
 
-  const onDrop = (files: File[]) => {
+  const processFolderContents = async (items: DataTransferItemList) => {
+    setIsFolderProcessing(true)
+    const results: AnalysisResult[] = []
+
+    // Convert DataTransferItemList to Array
+    const itemsArray = Array.from(items)
+
+    for (const item of itemsArray) {
+      const entry = item.webkitGetAsEntry()
+      if (entry?.isDirectory) {
+        await processDirectory(entry as FileSystemDirectoryEntry, results)
+      }
+    }
+
+    // Generate and download Excel report
+    generateReport(results)
+    setFolderResults(results)
+    setIsFolderProcessing(false)
+  }
+
+  const processDirectory = async (
+    dirEntry: FileSystemDirectoryEntry,
+    results: AnalysisResult[]
+  ) => {
+    const reader = dirEntry.createReader()
+    const entries = await new Promise<FileSystemEntry[]>((resolve) => {
+      reader.readEntries((entries) => resolve(entries))
+    })
+
+    for (const entry of entries) {
+      if (entry.isDirectory) {
+        const category = entry.name.toLowerCase() // 'good' or 'bad'
+        if (category === 'good' || category === 'bad') {
+          await processImagesInDirectory(
+            entry as FileSystemDirectoryEntry,
+            category,
+            results
+          )
+        }
+      }
+    }
+  }
+
+  const processImagesInDirectory = async (
+    dirEntry: FileSystemDirectoryEntry,
+    category: string,
+    results: AnalysisResult[]
+  ) => {
+    const reader = dirEntry.createReader()
+    const entries = await new Promise<FileSystemEntry[]>((resolve) => {
+      reader.readEntries((entries) => resolve(entries))
+    })
+
+    for (const entry of entries) {
+      if (entry.isFile && /\.(jpg|jpeg|png)$/i.test(entry.name)) {
+        const fileEntry = entry as FileSystemFileEntry
+        const file = await new Promise<File>((resolve) => {
+          fileEntry.file((file) => resolve(file))
+        })
+
+        // Process image using existing detection logic
+        const compressedFile = await compressImage(file)
+        const base64Image = await convertToBase64(compressedFile)
+
+        const response = await handleAPICall({
+          action: AIAction.DETECT,
+          base64Image,
+          items: 'corrosion', // You might want to make this configurable
+          aiToUse: useAI,
+        })
+
+        const { detectedItems } = await response?.json()
+
+        results.push({
+          filename: entry.name,
+          expectedCategory: category,
+          detectedResult: detectedItems,
+          isCorrect:
+            (category === 'bad' &&
+              detectedItems.toLowerCase().includes('corrosion')) ||
+            (category === 'good' &&
+              !detectedItems.toLowerCase().includes('corrosion')),
+        })
+      }
+    }
+  }
+
+  const generateReport = (results: AnalysisResult[]) => {
+    // We'll use a library like xlsx to generate the report
+    // This is a placeholder for the implementation
+    const worksheet = XLSX.utils.json_to_sheet(results)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Analysis Results')
+    XLSX.writeFile(workbook, 'corrosion-analysis-report.xlsx')
+  }
+
+  const onDrop = async (files: File[], event?: any) => {
     setPreview(null)
     setProgress(0)
     setResult('')
-    if (files.length > 0) {
+    setFolderResults([])
+
+    if (event?.dataTransfer?.items) {
+      await processFolderContents(event.dataTransfer.items)
+    } else if (files.length > 0) {
+      // Existing single file logic
       const file = files[0]
       setSelectedFiles(files)
       setPreview(URL.createObjectURL(file))
@@ -236,6 +347,31 @@ export const UploadFiles = () => {
           </div>
         )}
       </div>
+
+      {/* Add folder results display */}
+      {folderResults.length > 0 && (
+        <div className="mt-6">
+          <h2 className="text-xl font-bold mb-4">Folder Analysis Results</h2>
+          <div className="grid gap-4">
+            {folderResults.map((result, index) => (
+              <div
+                key={index}
+                className={`p-4 rounded ${
+                  result.isCorrect ? 'bg-green-100' : 'bg-red-100'
+                }`}
+              >
+                <p>File: {result.filename}</p>
+                <p>Expected: {result.expectedCategory}</p>
+                <p>Detected: {result.detectedResult}</p>
+                <p>
+                  Status:{' '}
+                  {result.isCorrect ? 'Correct' : 'False Positive/Negative'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

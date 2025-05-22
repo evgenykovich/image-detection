@@ -9,10 +9,21 @@ if (typeof window === 'undefined') {
 }
 
 export const base64Helper = (imageBase64: string) => {
-  const prefix = 'data:image/jpeg;base64,'
-  return imageBase64.startsWith(prefix)
-    ? imageBase64.substring(prefix.length)
-    : imageBase64
+  // Handle both data URL format and raw base64
+  const dataUrlRegex = /^data:image\/([a-zA-Z]+);base64,/
+  const match = imageBase64.match(dataUrlRegex)
+
+  if (match) {
+    // If it's a data URL, extract just the base64 data
+    return imageBase64.substring(imageBase64.indexOf(',') + 1)
+  }
+
+  // If it's already raw base64, return as is
+  return imageBase64
+}
+
+export const addImagePrefix = (base64Data: string, mimeType = 'image/jpeg') => {
+  return `data:${mimeType};base64,${base64Data}`
 }
 
 export const validateUrl = (url: string) => {

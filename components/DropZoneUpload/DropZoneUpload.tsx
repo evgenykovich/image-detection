@@ -1,16 +1,18 @@
-import Image from 'next/image'
-import Dropzone from 'react-dropzone'
+import React from 'react'
+import { useDropzone } from 'react-dropzone'
 import { Button } from '@/components/ui/button'
 import { AIAction } from '@/util/enums'
 import './DropZone.styles.css'
 
 interface DropZoneUploadProps {
-  onDrop: (files: File[]) => void
+  onDrop: (files: File[], event?: any) => void
   selectedFiles: File[] | undefined
-  preview: string | null
-  handleSubmit: (action: AIAction) => void
-  handleClear: () => void
+  preview?: string | null
+  handleSubmit?: (action: string) => void
+  handleClear?: () => void
   renderGetMeasurments?: () => React.ReactNode
+  accept?: string
+  maxFiles?: number
 }
 
 export const DropZoneUpload = ({
@@ -20,47 +22,64 @@ export const DropZoneUpload = ({
   handleSubmit,
   handleClear,
   renderGetMeasurments,
+  accept,
+  maxFiles = 1,
 }: DropZoneUploadProps) => {
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: accept ? { [accept]: [] } : undefined,
+    maxFiles,
+  })
+
   return (
-    <Dropzone
-      onDrop={onDrop}
-      multiple={false}
-      disabled={Boolean(selectedFiles?.[0])}
-    >
-      {({ getRootProps, getInputProps }) => (
-        <section className="w-full">
-          <div {...getRootProps({ className: 'dropzone' })}>
-            <input {...getInputProps()} />
-            {preview ? (
-              <div className="selected-file">
-                <Image height={350} width={350} src={preview} alt="Image" />
-              </div>
-            ) : (
-              'Drag and drop file here, or click to select file'
-            )}
+    <div>
+      <div
+        {...getRootProps()}
+        className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer ${
+          isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+        }`}
+      >
+        <input {...getInputProps()} />
+        {isDragActive ? (
+          <p>Drop the files here ...</p>
+        ) : (
+          <p>Drag and drop files here, or click to select files</p>
+        )}
+        {selectedFiles && (
+          <div className="mt-4">
+            <p>Selected file: {selectedFiles[0]?.name}</p>
           </div>
-          <aside className="flex flex-col sm:flex-row items-center justify-between w-full">
-            <div className="flex flex-col sm:flex-row items-center sm:space-x-4 w-full sm:w-auto">
-              <Button
-                className="w-full sm:w-auto mb-2 sm:mb-0 text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
-                disabled={!selectedFiles}
-                onClick={() => handleSubmit(AIAction.DETECT)}
-              >
-                Detect
-              </Button>
-              {renderGetMeasurments && renderGetMeasurments()}
-            </div>
-            {selectedFiles && selectedFiles.length > 0 && (
-              <Button
-                className="w-full sm:w-auto text-white bg-red-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg mt-2 sm:mt-0"
-                onClick={handleClear}
-              >
-                Clear
-              </Button>
-            )}
-          </aside>
-        </section>
+        )}
+        {preview && (
+          <div className="mt-4">
+            <img
+              src={preview}
+              alt="Preview"
+              style={{ maxWidth: '200px', margin: '0 auto' }}
+            />
+          </div>
+        )}
+      </div>
+
+      {selectedFiles && handleSubmit && (
+        <div className="flex flex-col sm:flex-row justify-center gap-4 mt-4">
+          <Button
+            className="w-full sm:w-auto mb-2 sm:mb-0 text-white bg-blue-500 border-0 py-2 px-4 focus:outline-none hover:bg-blue-600 hover:cursor-pointer rounded text-lg"
+            onClick={() => handleSubmit(AIAction.DETECT)}
+          >
+            Detect Items
+          </Button>
+          {renderGetMeasurments && renderGetMeasurments()}
+          {handleClear && (
+            <Button
+              className="w-full sm:w-auto text-white bg-red-500 border-0 py-2 px-4 focus:outline-none hover:bg-red-600 hover:cursor-pointer rounded text-lg"
+              onClick={handleClear}
+            >
+              Clear
+            </Button>
+          )}
+        </div>
       )}
-    </Dropzone>
+    </div>
   )
 }
