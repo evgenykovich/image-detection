@@ -14,6 +14,7 @@ import {
   mapColumnToLang,
   addImagePrefix,
 } from './helpers'
+import { ValidationResponse } from '@/types/validation'
 
 const googleAPIKey = process.env.GOOGLE_AI_API_KEY
 const claudeAPIKey = process.env.CLAUDE_API_KEY
@@ -46,7 +47,8 @@ const getValidationConfig = (folderPath: string): ValidationConfig => {
 
   const category = categoryFolder.replace(/^\d{2}-/, '')
   const expectedState = stateFolder.replace(/^\d{2}-/, '')
-
+  debugger
+  console.log(category, expectedState)
   let prompt = ''
   switch (category.toLowerCase()) {
     case 'corrosion':
@@ -178,8 +180,15 @@ export const getValueFromFieldsInImage = async (
 
 export const validateImageByFolder = async (
   imageBase64: string,
-  folderPath: string
-) => {
+  path: string,
+  useVectorStore: boolean = true,
+  isTrainingMode: boolean = false,
+  validateWithRules: boolean = true
+): Promise<ValidationResponse> => {
+  console.log('Validating image with vector store:', useVectorStore)
+  console.log('Training mode:', isTrainingMode)
+  console.log('Rules validation:', validateWithRules)
+
   try {
     const response = await fetch('/api/validate-image', {
       method: 'POST',
@@ -188,22 +197,21 @@ export const validateImageByFolder = async (
       },
       body: JSON.stringify({
         imageBase64,
-        folderPath,
+        folderPath: path,
+        useVectorStore,
+        isTrainingMode,
+        validateWithRules,
       }),
     })
 
     if (!response.ok) {
-      throw new Error('Failed to validate image')
+      const error = await response.json()
+      throw new Error(error.error || 'Failed to validate image')
     }
 
-    const data = await response.json()
-    return {
-      result: data.result,
-      category: data.category,
-      expectedState: data.expectedState,
-    }
+    return await response.json()
   } catch (error) {
-    console.error('Error in validateImageByFolder:', error)
+    console.error('Error validating image:', error)
     throw error
   }
 }
@@ -219,7 +227,7 @@ export const detect = async (imageBase64: string, items: string[]) => {
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [
         {
           role: 'user',
@@ -388,36 +396,4 @@ export const measurments = async (imageBase64: string, items: string[]) => {
   console.log(response.choices[0])
 
   return response.choices[0]
-}
-
-export const translateWithGlossary = async (
-  text: string,
-  glossaryFile: File | undefined,
-  sourceLang: string,
-  targetLang: string
-): Promise<string> => {
-  try {
-    const formData = new FormData()
-    formData.append('text', text)
-    formData.append('sourceLang', sourceLang)
-    formData.append('targetLang', targetLang)
-    if (glossaryFile) {
-      formData.append('glossary', glossaryFile)
-    }
-
-    const response = await fetch('/api/glossary', {
-      method: 'POST',
-      body: formData,
-    })
-
-    if (!response.ok) {
-      throw new Error('Failed to process translation')
-    }
-
-    const data = await response.json()
-    return data.translation
-  } catch (error) {
-    console.error('Error in translation:', error)
-    throw error
-  }
 }

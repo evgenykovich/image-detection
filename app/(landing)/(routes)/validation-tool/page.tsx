@@ -1,9 +1,9 @@
 import { PageLayout } from '@/components/layouts/PageLayout'
 import { UploadZip } from '@/components/UploadZip/UploadZip'
 
-const title = 'Corrosion Image Validation Tool'
+const title = 'Image Validation Tool'
 const description =
-  'Upload a zip file containing good and bad corrosion images for automated validation and analysis'
+  'Upload a zip file containing good and bad images for automated validation and analysis '
 
 const ValidationToolPage = () => {
   return (

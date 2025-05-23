@@ -1,36 +1,106 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Image Validation System
 
-## Getting Started
+A sophisticated system for validating mechanical component images using AI, computer vision, and vector similarity search.
 
-First, run the development server:
+## Features
+
+- **Multi-modal Validation**: Combines computer vision, vector similarity search, and LLM analysis
+- **Category-specific Guidelines**: Detailed validation criteria for different component types
+- **Feature Extraction**: Advanced image analysis using edge detection and structural features
+- **Similar Case Retrieval**: Vector similarity search for finding relevant historical cases
+- **Comprehensive Analysis**: Detailed validation results with confidence scores and explanations
+
+## Supported Categories
+
+- Corrosion Detection
+- Thread Analysis
+- Connector Plate Inspection
+- Cotter Pin Validation
+- Spacer Plate Verification
+- Positive Connection Check
+- Cable Diameter Measurement
+
+## Setup
+
+1. Install dependencies:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Configure environment variables:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Copy `.env.example` to `.env.local`
+- Add your API keys:
+  - OpenAI API key
+  - Pinecone API key and environment
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+3. Initialize Pinecone index:
 
-## Learn More
+```bash
+npx tsx scripts/init-pinecone.ts
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Usage
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```typescript
+import { validateImage } from '@/lib/services/validation'
+import { Category, State } from '@/types/validation'
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+// Validate an image
+const result = await validateImage(
+  imageBuffer,
+  'threads' as Category,
+  'good' as State
+)
 
-## Deploy on Vercel
+console.log(result)
+// {
+//   isValid: boolean
+//   confidence: number
+//   diagnosis: string
+//   matchedCriteria: string[]
+//   failedCriteria: string[]
+//   similarCases: SimilarCase[]
+//   explanation: string
+// }
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Architecture
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+The system consists of several key components:
+
+1. **Feature Extraction Service**
+
+   - Uses Sharp for image processing
+   - Extracts visual and structural features
+   - Calculates edge density and sharpness
+
+2. **Vector Storage Service**
+
+   - Manages similar case retrieval
+   - Uses Pinecone for vector similarity search
+   - Stores historical validation cases
+
+3. **Guidelines Service**
+
+   - Provides category-specific validation rules
+   - Defines critical features and measurements
+   - Contains example cases
+
+4. **Validation Service**
+   - Orchestrates the validation process
+   - Combines multiple analysis methods
+   - Generates comprehensive results
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+MIT

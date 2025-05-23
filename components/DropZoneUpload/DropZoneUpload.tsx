@@ -41,13 +41,17 @@ export const DropZoneUpload = ({
       >
         <input {...getInputProps()} />
         {isDragActive ? (
-          <p>Drop the files here ...</p>
+          <p className="text-white">Drop the files here ...</p>
         ) : (
-          <p>Drag and drop files here, or click to select files</p>
+          <p className="text-white">
+            Drag and drop files here, or click to select files
+          </p>
         )}
         {selectedFiles && (
           <div className="mt-4">
-            <p>Selected file: {selectedFiles[0]?.name}</p>
+            <p className="text-white">
+              Selected file: {selectedFiles[0]?.name}
+            </p>
           </div>
         )}
         {preview && (

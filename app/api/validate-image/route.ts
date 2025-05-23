@@ -1,111 +1,212 @@
-import { NextResponse } from 'next/server'
-import { OpenAI as langChainOpenAI } from 'langchain/llms/openai'
+import { validateImage } from '@/lib/services/validation'
+import { validateCategory, getExpectedStates } from '@/lib/services/guidelines'
+import { Category, State } from '@/types/validation'
+import sharp from 'sharp'
 
-interface ValidationConfig {
-  category: string
-  expectedState: string
-  prompt: string
-}
-
-const getValidationConfig = (folderPath: string): ValidationConfig => {
+function normalizeCategoryName(folderPath: string): string {
   const parts = folderPath.split('/')
   const categoryFolder = parts.find((p) => /^\d{2}-/.test(p)) || ''
+  return categoryFolder
+    .replace(/^\d{2}-/, '')
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+}
+
+function normalizeState(folderPath: string): string {
+  const parts = folderPath.split('/')
   const stateFolder =
     parts.find((p) =>
       /(Present|Missing|Visible|No |Has |Bent|Straight|38inch)/.test(p)
     ) || ''
 
-  const category = categoryFolder.replace(/^\d{2}-/, '')
-  const expectedState = stateFolder.replace(/^\d{2}-/, '')
+  const state = stateFolder
+    .replace(/^\d{2}-/, '')
+    .toLowerCase()
+    .trim()
 
-  let prompt = ''
-  switch (category.toLowerCase()) {
-    case 'corrosion':
-      prompt = `Analyze this image and determine if there is any visible corrosion. Focus on signs of rust, deterioration, or surface degradation. The image should show ${expectedState.toLowerCase()}.`
-      break
-    case 'threads':
-      prompt = `Examine this image and determine if there are visible threads on the component. The threads should be ${expectedState.toLowerCase()}.`
-      break
-    case 'connector plates':
-      prompt = `Analyze this image and determine if the connector plate is ${expectedState.toLowerCase()}. Look for any bending, straightness, or deformation.`
-      break
-    case 'cotter pins':
-      prompt = `Examine this image and determine if the cotter pins are ${expectedState.toLowerCase()}. Look for the presence or absence of cotter pins in the assembly.`
-      break
-    case 'spacer plates':
-      prompt = `Analyze this image and determine if the spacer plates are ${expectedState.toLowerCase()}. Check for proper placement and presence of spacer plates.`
-      break
-    case 'postitive connection':
-      prompt = `Examine this image and verify if the bolts are ${expectedState.toLowerCase()}. Check for proper bolt installation and presence.`
-      break
-    case 'cable diameter':
-      prompt = `Measure and verify if the cable diameter meets the minimum 38-inch requirement. Look for any signs that indicate the cable diameter is insufficient.`
-      break
-    default:
-      prompt = `Analyze this image and determine if it shows ${expectedState.toLowerCase()} for ${category.toLowerCase()}.`
+  // Map folder names to valid states
+  const stateMapping: { [key: string]: string } = {
+    'no corrosion': 'clean',
+    'has corrosion': 'corroded',
+    'no threads': 'missing',
+    'threads visible': 'visible',
+    'no threads visible': 'missing',
+    'threads present': 'present',
+    bent: 'bent',
+    straight: 'straight',
+    present: 'present',
+    missing: 'missing',
+    visible: 'visible',
+    '38inch': 'compliant',
+    '38inch minimum': 'compliant',
   }
 
-  return {
-    category,
-    expectedState,
-    prompt,
+  // Check if we have a mapping for this state
+  const mappedState = stateMapping[state]
+  if (mappedState) {
+    return mappedState
   }
+
+  // If no mapping found, return the original state
+  return state
 }
 
-const convertToJpeg = (base64Data: string): string => {
-  // Extract the actual base64 data, removing the data URL prefix if present
-  const base64Content = base64Data.includes('base64,')
-    ? base64Data.split('base64,')[1]
-    : base64Data
-
-  // Return as JPEG data URL
-  return `data:image/jpeg;base64,${base64Content}`
-}
-
-export async function POST(request: Request) {
+async function processImageBuffer(base64Image: string): Promise<Buffer> {
   try {
-    const { imageBase64, folderPath } = await request.json()
+    // More robust base64 data extraction
+    let base64Data = base64Image
+
+    // Handle data URL format with any image type
+    if (base64Image.startsWith('data:')) {
+      const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/)
+      if (!matches || matches.length !== 3) {
+        throw new Error('Invalid data URL format')
+      }
+      base64Data = matches[2]
+    }
+
+    // Validate base64 string
+    if (!base64Data.match(/^[A-Za-z0-9+/]+={0,2}$/)) {
+      throw new Error('Invalid base64 format')
+    }
+
+    // Convert to buffer
+    const buffer = Buffer.from(base64Data, 'base64')
+    if (buffer.length === 0) {
+      throw new Error('Empty image buffer')
+    }
+
+    // Try to determine format and process with Sharp
+    const image = sharp(buffer)
+    const metadata = await image.metadata()
+
+    if (!metadata.format) {
+      throw new Error('Unable to determine image format')
+    }
+
+    if (!metadata.width || !metadata.height) {
+      throw new Error('Invalid image dimensions')
+    }
+
+    console.log('Processing image:', {
+      format: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      size: buffer.length,
+    })
+
+    // Convert to standard format and validate
+    return await image
+      .toFormat('jpeg', {
+        quality: 90,
+        chromaSubsampling: '4:4:4', // Better quality for technical images
+      })
+      .toBuffer()
+  } catch (error) {
+    console.error('Error processing image buffer:', error)
+    const errorMessage =
+      error instanceof Error ? error.message : 'unknown error'
+    console.error('Full error details:', error)
+    throw new Error('Failed to process image: ' + errorMessage)
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const {
+      imageBase64,
+      folderPath,
+      useVectorStore = true,
+      isTrainingMode = false, // Whether this is for training/seeding
+      validateWithRules = true, // Whether to use validation rules
+    } = await req.json()
 
     if (!imageBase64 || !folderPath) {
-      return NextResponse.json(
-        { error: 'Image and folder path are required' },
+      return new Response(
+        JSON.stringify({
+          error: 'Missing required fields: imageBase64 or folderPath',
+        }),
         { status: 400 }
       )
     }
 
-    // Convert the image to JPEG format
-    const jpegImage = convertToJpeg(imageBase64)
+    const category = normalizeCategoryName(folderPath)
+    const expectedState = normalizeState(folderPath)
 
-    const model = new langChainOpenAI({
-      temperature: 0,
-      modelName: 'gpt-4o-mini',
-      openAIApiKey: process.env.OPENAI_API_KEY,
-    })
+    const isValidCategory = await validateCategory(category)
+    if (!isValidCategory) {
+      return new Response(
+        JSON.stringify({
+          error: `Invalid category: ${category}. Please check available categories in the configuration.`,
+        }),
+        { status: 400 }
+      )
+    }
 
-    const config = getValidationConfig(folderPath)
+    const validStates = await getExpectedStates(category as Category)
+    if (!validStates.includes(expectedState)) {
+      return new Response(
+        JSON.stringify({
+          error: `Invalid state '${expectedState}' for category '${category}'. Valid states are: ${validStates.join(
+            ', '
+          )}`,
+        }),
+        { status: 400 }
+      )
+    }
 
-    const response = await model.call([
-      {
-        type: 'text',
-        text: config.prompt,
-      },
-      {
-        type: 'image_url',
-        image_url: {
-          url: jpegImage,
+    try {
+      // Process and validate the image buffer
+      const imageBuffer = await processImageBuffer(imageBase64)
+
+      // Configure validation options based on mode
+      const validationOptions = {
+        useVectorStore,
+        isGroundTruth: isTrainingMode, // Ground truth if in training mode
+        storeResults: isTrainingMode || useVectorStore, // Store if training or vector store enabled
+        compareWithRules: validateWithRules,
+      }
+
+      // Proceed with validation
+      const result = await validateImage(
+        imageBuffer,
+        category as Category,
+        expectedState as State,
+        validationOptions
+      )
+
+      // Add mode information to response
+      const response = {
+        ...result,
+        mode: isTrainingMode ? 'training' : 'validation',
+        vectorStoreUsed: useVectorStore,
+        rulesUsed: validateWithRules,
+      }
+
+      return new Response(JSON.stringify(response), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
         },
-      },
-    ] as any)
-
-    return NextResponse.json({
-      result: response,
-      category: config.category,
-      expectedState: config.expectedState,
-    })
+      })
+    } catch (error) {
+      console.error('Error processing image:', error)
+      return new Response(
+        JSON.stringify({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Invalid image format or corrupted image data',
+        }),
+        { status: 400 }
+      )
+    }
   } catch (error) {
-    console.error('Error validating image:', error)
-    return NextResponse.json(
-      { error: 'Failed to validate image' },
+    console.error('Error in validate-image route:', error)
+    return new Response(
+      JSON.stringify({
+        error: 'Internal server error',
+      }),
       { status: 500 }
     )
   }
