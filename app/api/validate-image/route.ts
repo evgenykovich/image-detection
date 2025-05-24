@@ -1,5 +1,4 @@
 import { validateImage } from '@/lib/services/validation'
-import { validateCategory, getExpectedStates } from '@/lib/services/guidelines'
 import { Category, State } from '@/types/validation'
 import sharp from 'sharp'
 
@@ -12,11 +11,14 @@ function normalizeCategoryName(folderPath: string): string {
     .replace(/\s+/g, '_')
 }
 
-function normalizeState(folderPath: string): string {
+function normalizeState(folderPath: string): {
+  state: string
+  measurement?: string
+} {
   const parts = folderPath.split('/')
   const stateFolder =
     parts.find((p) =>
-      /(Present|Missing|Visible|No |Has |Bent|Straight|38inch)/.test(p)
+      /(Present|Missing|Visible|No |Has |Bent|Straight|\d+inch)/.test(p)
     ) || ''
 
   const state = stateFolder
@@ -24,31 +26,79 @@ function normalizeState(folderPath: string): string {
     .toLowerCase()
     .trim()
 
+  // Extract measurement if present (e.g., "38inch minimum" -> "3/8")
+  let measurement: string | undefined
+  const measurementMatch = state.match(/(\d+)inch/)
+  if (measurementMatch) {
+    const numValue = parseInt(measurementMatch[1])
+    if (numValue === 38) {
+      measurement = '3/8'
+    } else if (numValue === 25) {
+      measurement = '1/4'
+    } else {
+      measurement = `${numValue}/8` // Default to eighths
+    }
+  }
+
   // Map folder names to valid states
   const stateMapping: { [key: string]: string } = {
+    // Corrosion states
     'no corrosion': 'clean',
     'has corrosion': 'corroded',
+    clean: 'clean',
+    corroded: 'corroded',
+
+    // Thread states
     'no threads': 'missing',
     'threads visible': 'visible',
     'no threads visible': 'missing',
     'threads present': 'present',
+    'threads missing': 'missing',
+
+    // Connector Plates states
     bent: 'bent',
     straight: 'straight',
+    'plate bent': 'bent',
+    'plate straight': 'straight',
+
+    // Generic states (for Cotter Pins, Spacer Plates)
     present: 'present',
     missing: 'missing',
     visible: 'visible',
-    '38inch': 'compliant',
-    '38inch minimum': 'compliant',
+    'not visible': 'missing',
+    'not present': 'missing',
+
+    // Cable Diameter states - now handled dynamically
+    minimum: 'compliant',
+    below: 'non_compliant',
+    under: 'non_compliant',
+
+    // Positive Connection states
+    secure: 'secure',
+    unsecure: 'unsecure',
+    proper: 'secure',
+    improper: 'unsecure',
+    connected: 'secure',
+    disconnected: 'unsecure',
   }
 
   // Check if we have a mapping for this state
-  const mappedState = stateMapping[state]
-  if (mappedState) {
-    return mappedState
+  let mappedState = stateMapping[state]
+
+  // Handle diameter measurements
+  if (!mappedState && measurementMatch) {
+    if (state.includes('minimum') || state.includes('above')) {
+      mappedState = 'compliant'
+    } else if (state.includes('below') || state.includes('under')) {
+      mappedState = 'non_compliant'
+    }
   }
 
   // If no mapping found, return the original state
-  return state
+  return {
+    state: mappedState || state,
+    measurement,
+  }
 }
 
 async function processImageBuffer(base64Image: string): Promise<Buffer> {
@@ -117,8 +167,7 @@ export async function POST(req: Request) {
       imageBase64,
       folderPath,
       useVectorStore = true,
-      isTrainingMode = false, // Whether this is for training/seeding
-      validateWithRules = true, // Whether to use validation rules
+      isTrainingMode = false,
     } = await req.json()
 
     if (!imageBase64 || !folderPath) {
@@ -130,30 +179,9 @@ export async function POST(req: Request) {
       )
     }
 
+    // Extract category and state from folder path
     const category = normalizeCategoryName(folderPath)
-    const expectedState = normalizeState(folderPath)
-
-    const isValidCategory = await validateCategory(category)
-    if (!isValidCategory) {
-      return new Response(
-        JSON.stringify({
-          error: `Invalid category: ${category}. Please check available categories in the configuration.`,
-        }),
-        { status: 400 }
-      )
-    }
-
-    const validStates = await getExpectedStates(category as Category)
-    if (!validStates.includes(expectedState)) {
-      return new Response(
-        JSON.stringify({
-          error: `Invalid state '${expectedState}' for category '${category}'. Valid states are: ${validStates.join(
-            ', '
-          )}`,
-        }),
-        { status: 400 }
-      )
-    }
+    const { state: expectedState, measurement } = normalizeState(folderPath)
 
     try {
       // Process and validate the image buffer
@@ -162,12 +190,12 @@ export async function POST(req: Request) {
       // Configure validation options based on mode
       const validationOptions = {
         useVectorStore,
-        isGroundTruth: isTrainingMode, // Ground truth if in training mode
-        storeResults: isTrainingMode || useVectorStore, // Store if training or vector store enabled
-        compareWithRules: validateWithRules,
+        isGroundTruth: isTrainingMode,
+        storeResults: isTrainingMode || useVectorStore,
+        measurement, // Pass the measurement to validation
       }
 
-      // Proceed with validation
+      // Validate the image using folder-based validation
       const result = await validateImage(
         imageBuffer,
         category as Category,
@@ -180,7 +208,9 @@ export async function POST(req: Request) {
         ...result,
         mode: isTrainingMode ? 'training' : 'validation',
         vectorStoreUsed: useVectorStore,
-        rulesUsed: validateWithRules,
+        category,
+        expectedState,
+        measurement,
       }
 
       return new Response(JSON.stringify(response), {
@@ -193,21 +223,20 @@ export async function POST(req: Request) {
       console.error('Error processing image:', error)
       return new Response(
         JSON.stringify({
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Invalid image format or corrupted image data',
+          error: 'Failed to process or validate image',
+          details: error instanceof Error ? error.message : 'Unknown error',
         }),
-        { status: 400 }
+        { status: 500 }
       )
     }
   } catch (error) {
-    console.error('Error in validate-image route:', error)
+    console.error('Error handling request:', error)
     return new Response(
       JSON.stringify({
-        error: 'Internal server error',
+        error: 'Invalid request format',
+        details: error instanceof Error ? error.message : 'Unknown error',
       }),
-      { status: 500 }
+      { status: 400 }
     )
   }
 }

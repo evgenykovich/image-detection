@@ -13,12 +13,80 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { aiInUse } from '@/store'
 import { validateImageByFolder } from '@/util/ai'
 import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import { DropZoneUpload } from '../DropZoneUpload'
 import { Download, Folder, ChevronDown, Loader2 } from 'lucide-react'
+
+interface ValidationResponse {
+  isValid: boolean
+  confidence: number
+  diagnosis:
+    | string
+    | {
+        overall_assessment: string
+        confidence_level: number
+        key_observations: string[]
+        matched_criteria: string[]
+        failed_criteria: string[]
+        detailed_explanation: string
+      }
+  matchedCriteria: string[]
+  failedCriteria: string[]
+  similarCases: Array<{
+    imageUrl: string
+    category: string
+    state: string
+    confidence: number
+    keyFeatures: string[]
+    diagnosis?:
+      | string
+      | {
+          overall_assessment: string
+          confidence_level: number
+          key_observations: string[]
+          matched_criteria: string[]
+          failed_criteria: string[]
+          detailed_explanation: string
+        }
+  }>
+  explanation: string
+  features?: {
+    structuralFeatures: {
+      edges: number
+      contrast: number
+      brightness: number
+      sharpness: number
+    }
+    metadata: {
+      dimensions: {
+        width: number
+        height: number
+      }
+      format: string
+      size: number
+    }
+    visualFeatures?: number[]
+  }
+  result: string
+  category: string
+  expectedState: string
+  mode: 'training' | 'validation'
+  vectorStoreUsed: boolean
+  measurement?: string
+}
 
 interface ValidationResult {
   filename: string
@@ -97,60 +165,8 @@ interface ValidationResult {
     }
     visualFeatures?: number[]
   }
-  matchedCriteria?: string[]
-  failedCriteria?: string[]
-  similarCases?: Array<{
-    imageUrl: string
-    category: string
-    state: string
-    confidence: number
-    keyFeatures: string[]
-    diagnosis?:
-      | string
-      | {
-          overall_assessment: string
-          confidence_level: number
-          key_observations: string[]
-          matched_criteria: string[]
-          failed_criteria: string[]
-          detailed_explanation: string
-        }
-  }>
-}
-
-interface ValidationResponse {
-  result: string
-  category: string
-  expectedState: string
-  confidence?: number
-  diagnosis?:
-    | string
-    | {
-        overall_assessment: string
-        confidence_level: number
-        key_observations: string[]
-        matched_criteria: string[]
-        failed_criteria: string[]
-        detailed_explanation: string
-      }
-  explanation?: string
-  features?: {
-    structuralFeatures: {
-      edges: number
-      contrast: number
-      brightness: number
-      sharpness: number
-    }
-    metadata: {
-      dimensions: {
-        width: number
-        height: number
-      }
-      format: string
-      size: number
-    }
-    visualFeatures?: number[]
-  }
+  matchedCriteria: string[]
+  failedCriteria: string[]
   similarCases?: Array<{
     imageUrl: string
     category: string
@@ -202,9 +218,11 @@ export const UploadZip = () => {
     'training' | 'validation'
   >('validation')
   const [useVectorStore, setUseVectorStore] = useState(true)
-  const [useRulesValidation, setUseRulesValidation] = useState(true)
 
   const useAI = useAtomValue(aiInUse)
+
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false)
+  const [exportFileName, setExportFileName] = useState('validation-results')
 
   const convertToBase64 = async (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -226,8 +244,7 @@ export const UploadZip = () => {
         base64Image,
         path,
         useVectorStore,
-        validationMode === 'training',
-        useRulesValidation
+        validationMode === 'training'
       )
 
       // Parse diagnosis if it's a JSON string
@@ -262,33 +279,41 @@ export const UploadZip = () => {
       }
 
       // Parse explanation if it's a JSON string
-      let parsedExplanation
+      let parsedExplanation = validationResult.explanation
       if (typeof validationResult.explanation === 'string') {
         try {
           // Remove the markdown code block markers if present
-          const explanationStr = validationResult.explanation.replace(
-            /```json\n|\n```/g,
-            ''
-          )
-          parsedExplanation = JSON.parse(explanationStr)
+          const explanationStr = validationResult.explanation
+            .replace(/```json\n|\n```/g, '')
+            .trim()
+          // Only try to parse if it looks like JSON
+          if (explanationStr.startsWith('{') && explanationStr.endsWith('}')) {
+            parsedExplanation = JSON.parse(explanationStr)
+          }
         } catch (e) {
           console.warn('Failed to parse explanation JSON:', e)
+          // Keep the original string if parsing fails
           parsedExplanation = validationResult.explanation
         }
-      } else {
-        parsedExplanation = validationResult.explanation
       }
 
       // Determine isValid based on the diagnosis overall assessment
       const isValid =
-        parsedDiagnosis?.overall_assessment?.toLowerCase() !== 'invalid'
+        parsedDiagnosis?.overall_assessment?.toLowerCase() === 'valid' ||
+        parsedDiagnosis?.overall_assessment?.toLowerCase() === 'pass'
 
       // Get detection result from diagnosis or validation result
       const detectionResult =
         parsedDiagnosis?.key_observations?.[0] ||
         parsedDiagnosis?.overall_assessment ||
         validationResult.result ||
-        'Cable diameter validation failed'
+        'Validation failed'
+
+      // Get matchedCriteria from either the top-level field or diagnosis
+      const matchedCriteria =
+        validationResult.matchedCriteria ||
+        parsedDiagnosis?.matched_criteria ||
+        []
 
       return {
         filename,
@@ -302,7 +327,7 @@ export const UploadZip = () => {
         diagnosis: parsedDiagnosis,
         explanation: parsedExplanation,
         features: validationResult.features,
-        matchedCriteria: parsedDiagnosis?.matched_criteria || [],
+        matchedCriteria,
         failedCriteria: parsedDiagnosis?.failed_criteria || [],
         similarCases: validationResult.similarCases?.map((c) => {
           if (c.diagnosis && typeof c.diagnosis === 'string') {
@@ -331,6 +356,7 @@ export const UploadZip = () => {
         expectedState: 'unknown',
         detectedResult: 'Error processing image',
         isValid: false,
+        confidence: 0,
         diagnosis: {
           overall_assessment: 'Error',
           confidence_level: 0,
@@ -340,6 +366,11 @@ export const UploadZip = () => {
           detailed_explanation:
             error instanceof Error ? error.message : 'Unknown error',
         },
+        matchedCriteria: [],
+        failedCriteria: ['Validation error occurred'],
+        explanation: error instanceof Error ? error.message : 'Unknown error',
+        features: undefined,
+        similarCases: [],
       }
     }
   }
@@ -458,20 +489,35 @@ export const UploadZip = () => {
     }
   }
 
-  const handleDownloadReport = () => {
-    const fileName = prompt(
-      'Enter file name for the report:',
-      'validation-results'
-    )
-    if (!fileName) return
+  const handleExportClick = () => {
+    setIsExportDialogOpen(true)
+  }
+
+  const handleExportConfirm = () => {
+    setIsExportDialogOpen(false)
+    if (exportFileName.trim()) {
+      generateExcelReport(exportFileName.trim())
+    }
+  }
+
+  const generateExcelReport = (fileName: string) => {
+    // Helper function to truncate and split long text
+    const processLongText = (
+      text: string,
+      maxLength: number = 32000
+    ): string[] => {
+      if (!text || text.length <= maxLength) return [text]
+      const chunks: string[] = []
+      for (let i = 0; i < text.length; i += maxLength) {
+        chunks.push(text.slice(i, i + maxLength))
+      }
+      return chunks
+    }
 
     // Transform results to flatten nested objects for Excel
-    const flattenedResults = results.map((result, index) => {
+    const flattenedResults = results.map((result) => {
       // Helper function to format explanation
       const formatExplanation = (result: any): string => {
-        console.log(`Processing explanation for result ${index}:`, result)
-
-        // First try to build explanation from diagnosis information
         const diagnosisExplanation = []
 
         if (result.diagnosis) {
@@ -498,7 +544,7 @@ export const UploadZip = () => {
           }
         }
 
-        // If we have a structured explanation object, add it
+        // Add structured explanation if available
         if (result.explanation && typeof result.explanation === 'object') {
           try {
             const sections: string[] = []
@@ -535,15 +581,7 @@ export const UploadZip = () => {
           }
         }
 
-        // If we have a string explanation, add it
-        if (result.explanation && typeof result.explanation === 'string') {
-          diagnosisExplanation.push('\nAdditional Details:')
-          diagnosisExplanation.push(result.explanation)
-        }
-
-        const finalExplanation = diagnosisExplanation.join('\n')
-        console.log('Final formatted explanation:', finalExplanation)
-        return finalExplanation
+        return diagnosisExplanation.join('\n')
       }
 
       const flattenedResult = {
@@ -557,24 +595,75 @@ export const UploadZip = () => {
           typeof result.confidence === 'number'
             ? `${(result.confidence * 100).toFixed(1)}%`
             : 'N/A',
-        // Diagnosis details
         'Overall Assessment': result.diagnosis?.overall_assessment || '',
         'Confidence Level': result.diagnosis?.confidence_level || '',
-        'Key Observations':
-          result.diagnosis?.key_observations?.join('\n') || '',
-        'Matched Criteria': result.matchedCriteria?.join('\n') || '',
-        'Failed Criteria': result.failedCriteria?.join('\n') || '',
-        'Detailed Explanation': formatExplanation(result),
-        // Feature details
-        Edges: result.features?.structuralFeatures.edges || '',
-        Contrast: result.features?.structuralFeatures.contrast || '',
-        Brightness: result.features?.structuralFeatures.brightness || '',
-        Sharpness: result.features?.structuralFeatures.sharpness || '',
-        'Image Width': result.features?.metadata.dimensions.width || '',
-        'Image Height': result.features?.metadata.dimensions.height || '',
-        'Image Format': result.features?.metadata.format || '',
-        'Image Size': result.features?.metadata.size || '',
       }
+
+      // Helper function to add fields with potential continuation
+      const addSplitField = (
+        obj: any,
+        fieldName: string,
+        content: string | undefined | null
+      ) => {
+        const chunks = processLongText(content || '')
+        if (chunks[0]) {
+          obj[fieldName] = chunks[0]
+          if (chunks[1]) {
+            obj[`${fieldName} (cont.)`] = chunks[1]
+          }
+        }
+      }
+
+      // Add all the potentially long fields
+      addSplitField(
+        flattenedResult,
+        'Key Observations',
+        result.diagnosis?.key_observations?.join('\n')
+      )
+      addSplitField(
+        flattenedResult,
+        'Matched Criteria',
+        result.matchedCriteria?.join('\n')
+      )
+      addSplitField(
+        flattenedResult,
+        'Failed Criteria',
+        result.failedCriteria?.join('\n')
+      )
+      addSplitField(
+        flattenedResult,
+        'Detailed Analysis',
+        formatExplanation(result)
+      )
+
+      // Add the remaining fields
+      Object.assign(flattenedResult, {
+        'Structural Features - Edges':
+          result.features?.structuralFeatures?.edges || '',
+        'Structural Features - Contrast':
+          result.features?.structuralFeatures?.contrast || '',
+        'Structural Features - Brightness':
+          result.features?.structuralFeatures?.brightness || '',
+        'Structural Features - Sharpness':
+          result.features?.structuralFeatures?.sharpness || '',
+        'Image Width': result.features?.metadata?.dimensions?.width || '',
+        'Image Height': result.features?.metadata?.dimensions?.height || '',
+        'Image Format': result.features?.metadata?.format || '',
+        'Image Size (KB)': result.features?.metadata?.size
+          ? (result.features.metadata.size / 1024).toFixed(1)
+          : '',
+        'Reference Match': result.diagnosis?.key_observations?.some((obs) =>
+          obs.toLowerCase().includes('matches reference image')
+        )
+          ? 'Yes'
+          : 'No',
+        'Reference Match Confidence':
+          result.diagnosis?.key_observations
+            ?.find((obs) =>
+              obs.toLowerCase().includes('matches reference image')
+            )
+            ?.match(/\d+\.?\d*%/)?.[0] || 'N/A',
+      })
 
       return flattenedResult
     })
@@ -586,25 +675,31 @@ export const UploadZip = () => {
     const columnWidths = {
       A: 30, // File Name
       B: 40, // Path
-      C: 15, // Category
-      D: 15, // Expected State
-      E: 15, // Detected Result
+      C: 20, // Category
+      D: 20, // Expected State
+      E: 30, // Detected Result
       F: 10, // Is Valid
-      G: 10, // Confidence
-      H: 20, // Overall Assessment
-      I: 10, // Confidence Level
-      J: 50, // Key Observations
-      K: 50, // Matched Criteria
-      L: 50, // Failed Criteria
-      M: 60, // Detailed Explanation
-      N: 10, // Edges
-      O: 10, // Contrast
-      P: 10, // Brightness
-      Q: 10, // Sharpness
-      R: 10, // Image Width
-      S: 10, // Image Height
-      T: 10, // Image Format
-      U: 10, // Image Size
+      G: 15, // Confidence
+      H: 30, // Overall Assessment
+      I: 15, // Confidence Level
+      J: 60, // Key Observations
+      K: 60, // Key Observations (cont.)
+      L: 60, // Matched Criteria
+      M: 60, // Matched Criteria (cont.)
+      N: 60, // Failed Criteria
+      O: 60, // Failed Criteria (cont.)
+      P: 60, // Detailed Analysis
+      Q: 60, // Detailed Analysis (cont.)
+      R: 15, // Edges
+      S: 15, // Contrast
+      T: 15, // Brightness
+      U: 15, // Sharpness
+      V: 15, // Image Width
+      W: 15, // Image Height
+      X: 15, // Image Format
+      Y: 15, // Image Size
+      Z: 15, // Reference Match
+      AA: 20, // Reference Match Confidence
     }
 
     worksheet['!cols'] = Object.entries(columnWidths).map(([, width]) => ({
@@ -614,6 +709,8 @@ export const UploadZip = () => {
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Validation Results')
     XLSX.writeFile(workbook, `${fileName}.xlsx`)
   }
+
+  console.log(results)
 
   return (
     <div className="w-full max-w-4xl space-y-6">
@@ -645,7 +742,7 @@ export const UploadZip = () => {
       {/* Validation Settings Panel */}
       <div className="p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg space-y-4">
         <div className="flex items-center justify-between">
-          <div className="space-y-2">
+          <div>
             <h3 className="text-xl font-semibold text-white flex items-center gap-2">
               Validation Settings
               <span className="text-xs font-normal px-2 py-1 rounded-full bg-blue-500/20 text-blue-300">
@@ -658,7 +755,7 @@ export const UploadZip = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Mode Selection */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-white/90">Mode</label>
@@ -698,23 +795,6 @@ export const UploadZip = () => {
             </div>
             <p className="text-xs text-white/60">
               Compare with similar examples
-            </p>
-          </div>
-
-          {/* Rules Validation Toggle */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-white/90">
-                Rules Validation
-              </label>
-              <Switch
-                checked={useRulesValidation}
-                onCheckedChange={setUseRulesValidation}
-                disabled={isProcessing}
-              />
-            </div>
-            <p className="text-xs text-white/60">
-              Validate against defined rules
             </p>
           </div>
         </div>
@@ -896,7 +976,7 @@ export const UploadZip = () => {
                   Validation Results
                 </h2>
                 <Button
-                  onClick={handleDownloadReport}
+                  onClick={handleExportClick}
                   className="flex items-center gap-2 bg-green-600/80 hover:bg-green-600/90 text-white"
                 >
                   <Download className="h-4 w-4" />
@@ -935,7 +1015,8 @@ export const UploadZip = () => {
                                   : 'bg-red-500/20 text-red-400'
                               }`}
                             >
-                              {result.isValid ? 'Valid' : 'Invalid'}
+                              {result.diagnosis?.overall_assessment ||
+                                (result.isValid ? 'Pass' : 'Fail')}
                             </div>
                             {result.confidence !== undefined && (
                               <div className="flex items-center gap-2">
@@ -989,7 +1070,7 @@ export const UploadZip = () => {
                                       }
                                     >
                                       {result.diagnosis?.overall_assessment ||
-                                        (result.isValid ? 'Valid' : 'Invalid')}
+                                        (result.isValid ? 'Pass' : 'Fail')}
                                     </span>
                                   </div>
                                   <div className="flex justify-between items-center">
@@ -1053,30 +1134,30 @@ export const UploadZip = () => {
                             </div>
 
                             <div className="space-y-4">
-                              {/* Validation Criteria */}
+                              {/* Validation Results */}
                               <div className="bg-white/5 rounded-lg p-4 space-y-4">
                                 <h3 className="text-lg font-semibold text-white">
-                                  Validation Criteria
+                                  Validation Results
                                 </h3>
 
-                                {/* Matched Criteria */}
+                                {/* Key Observations */}
                                 {result.matchedCriteria &&
                                   result.matchedCriteria.length > 0 && (
                                     <div className="space-y-2">
-                                      <h4 className="text-sm font-medium text-green-400">
-                                        Matched Criteria
+                                      <h4 className="text-sm font-medium text-blue-400">
+                                        Observations
                                       </h4>
                                       <ul className="space-y-1">
                                         {result.matchedCriteria.map(
-                                          (criteria, i) => (
+                                          (observation, i) => (
                                             <li
                                               key={i}
                                               className="flex items-start gap-2 text-white/70"
                                             >
-                                              <span className="text-green-400 mt-1">
-                                                ✓
+                                              <span className="text-blue-400 mt-1">
+                                                •
                                               </span>
-                                              <span>{criteria}</span>
+                                              <span>{observation}</span>
                                             </li>
                                           )
                                         )}
@@ -1084,125 +1165,168 @@ export const UploadZip = () => {
                                     </div>
                                   )}
 
-                                {/* Failed Criteria */}
-                                {result.failedCriteria &&
-                                  result.failedCriteria.length > 0 && (
-                                    <div className="space-y-2">
-                                      <h4 className="text-sm font-medium text-red-400">
-                                        Failed Criteria
+                                {/* Validation Criteria */}
+                                {result.diagnosis &&
+                                  ((result.diagnosis.matched_criteria &&
+                                    result.diagnosis.matched_criteria.length >
+                                      0) ||
+                                    (result.diagnosis.failed_criteria &&
+                                      result.diagnosis.failed_criteria.length >
+                                        0)) && (
+                                    <div className="space-y-4 mt-4">
+                                      <h4 className="text-sm font-medium text-white">
+                                        Validation Criteria
                                       </h4>
-                                      <ul className="space-y-1">
-                                        {result.failedCriteria.map(
-                                          (criteria, i) => (
-                                            <li
-                                              key={i}
-                                              className="flex items-start gap-2 text-white/70"
-                                            >
-                                              <span className="text-red-400 mt-1">
-                                                ✗
-                                              </span>
-                                              <span>{criteria}</span>
-                                            </li>
-                                          )
+
+                                      {/* Passed Criteria */}
+                                      {result.diagnosis.matched_criteria &&
+                                        result.diagnosis.matched_criteria
+                                          .length > 0 && (
+                                          <div className="space-y-2">
+                                            <h5 className="text-sm font-medium text-green-400">
+                                              Passed
+                                            </h5>
+                                            <ul className="space-y-1">
+                                              {result.diagnosis.matched_criteria.map(
+                                                (criteria, i) => (
+                                                  <li
+                                                    key={i}
+                                                    className="flex items-start gap-2 text-white/70"
+                                                  >
+                                                    <span className="text-green-400 mt-1">
+                                                      ✓
+                                                    </span>
+                                                    <span>{criteria}</span>
+                                                  </li>
+                                                )
+                                              )}
+                                            </ul>
+                                          </div>
                                         )}
-                                      </ul>
+
+                                      {/* Failed Criteria */}
+                                      {result.diagnosis.failed_criteria &&
+                                        result.diagnosis.failed_criteria
+                                          .length > 0 && (
+                                          <div className="space-y-2">
+                                            <h5 className="text-sm font-medium text-red-400">
+                                              Failed
+                                            </h5>
+                                            <ul className="space-y-1">
+                                              {result.diagnosis.failed_criteria.map(
+                                                (criteria, i) => (
+                                                  <li
+                                                    key={i}
+                                                    className="flex items-start gap-2 text-white/70"
+                                                  >
+                                                    <span className="text-red-400 mt-1">
+                                                      ✗
+                                                    </span>
+                                                    <span>{criteria}</span>
+                                                  </li>
+                                                )
+                                              )}
+                                            </ul>
+                                          </div>
+                                        )}
                                     </div>
                                   )}
+
+                                {/* Detailed Analysis */}
+                                {result.diagnosis?.detailed_explanation && (
+                                  <div className="bg-white/5 rounded-lg p-4 space-y-3">
+                                    <h3 className="text-lg font-semibold text-white">
+                                      Detailed Analysis
+                                    </h3>
+                                    <p className="text-white/70 text-sm whitespace-pre-wrap">
+                                      {result.diagnosis.detailed_explanation}
+                                    </p>
+                                  </div>
+                                )}
                               </div>
 
-                              {/* Detailed Analysis */}
-                              {result.diagnosis?.detailed_explanation && (
-                                <div className="bg-white/5 rounded-lg p-4 space-y-3">
+                              {/* Image Features */}
+                              {result.features && (
+                                <div className="bg-white/5 rounded-lg p-4 space-y-4">
                                   <h3 className="text-lg font-semibold text-white">
-                                    Detailed Analysis
+                                    Image Features
                                   </h3>
-                                  <p className="text-white/70 text-sm whitespace-pre-wrap">
-                                    {result.diagnosis.detailed_explanation}
-                                  </p>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    {/* Structural Features */}
+                                    <div className="space-y-3">
+                                      <h4 className="text-sm font-medium text-white/90">
+                                        Structural Features
+                                      </h4>
+                                      <div className="space-y-2">
+                                        {Object.entries(
+                                          result.features.structuralFeatures
+                                        ).map(([key, value]) => (
+                                          <div
+                                            key={key}
+                                            className="flex justify-between items-center"
+                                          >
+                                            <span className="text-white/70 capitalize">
+                                              {key}
+                                            </span>
+                                            <span className="text-white/90">
+                                              {typeof value === 'number'
+                                                ? value.toFixed(2)
+                                                : value}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    {/* Image Metadata */}
+                                    <div className="space-y-3">
+                                      <h4 className="text-sm font-medium text-white/90">
+                                        Image Metadata
+                                      </h4>
+                                      <div className="space-y-2">
+                                        <div className="flex justify-between items-center">
+                                          <span className="text-white/70">
+                                            Dimensions
+                                          </span>
+                                          <span className="text-white/90">
+                                            {
+                                              result.features.metadata
+                                                .dimensions.width
+                                            }{' '}
+                                            x{' '}
+                                            {
+                                              result.features.metadata
+                                                .dimensions.height
+                                            }
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                          <span className="text-white/70">
+                                            Format
+                                          </span>
+                                          <span className="text-white/90">
+                                            {result.features.metadata.format}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                          <span className="text-white/70">
+                                            Size
+                                          </span>
+                                          <span className="text-white/90">
+                                            {(
+                                              result.features.metadata.size /
+                                              1024
+                                            ).toFixed(1)}{' '}
+                                            KB
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
                                 </div>
                               )}
                             </div>
                           </div>
-
-                          {/* Image Features */}
-                          {result.features && (
-                            <div className="bg-white/5 rounded-lg p-4 space-y-4">
-                              <h3 className="text-lg font-semibold text-white">
-                                Image Features
-                              </h3>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {/* Structural Features */}
-                                <div className="space-y-3">
-                                  <h4 className="text-sm font-medium text-white/90">
-                                    Structural Features
-                                  </h4>
-                                  <div className="space-y-2">
-                                    {Object.entries(
-                                      result.features.structuralFeatures
-                                    ).map(([key, value]) => (
-                                      <div
-                                        key={key}
-                                        className="flex justify-between items-center"
-                                      >
-                                        <span className="text-white/70 capitalize">
-                                          {key}
-                                        </span>
-                                        <span className="text-white/90">
-                                          {typeof value === 'number'
-                                            ? value.toFixed(2)
-                                            : value}
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-
-                                {/* Image Metadata */}
-                                <div className="space-y-3">
-                                  <h4 className="text-sm font-medium text-white/90">
-                                    Image Metadata
-                                  </h4>
-                                  <div className="space-y-2">
-                                    <div className="flex justify-between items-center">
-                                      <span className="text-white/70">
-                                        Dimensions
-                                      </span>
-                                      <span className="text-white/90">
-                                        {
-                                          result.features.metadata.dimensions
-                                            .width
-                                        }{' '}
-                                        x{' '}
-                                        {
-                                          result.features.metadata.dimensions
-                                            .height
-                                        }
-                                      </span>
-                                    </div>
-                                    <div className="flex justify-between items-center">
-                                      <span className="text-white/70">
-                                        Format
-                                      </span>
-                                      <span className="text-white/90">
-                                        {result.features.metadata.format}
-                                      </span>
-                                    </div>
-                                    <div className="flex justify-between items-center">
-                                      <span className="text-white/70">
-                                        Size
-                                      </span>
-                                      <span className="text-white/90">
-                                        {(
-                                          result.features.metadata.size / 1024
-                                        ).toFixed(1)}{' '}
-                                        KB
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
                         </div>
                       </AccordionContent>
                     </AccordionItem>
@@ -1213,6 +1337,42 @@ export const UploadZip = () => {
           )}
         </div>
       )}
+
+      <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-gray-900/95 border border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-white">
+              Export Validation Report
+            </DialogTitle>
+            <DialogDescription className="text-white/70">
+              Enter a name for your validation report Excel file.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="filename" className="text-right text-white/90">
+                Filename
+              </Label>
+              <Input
+                id="filename"
+                value={exportFileName}
+                onChange={(e) => setExportFileName(e.target.value)}
+                className="col-span-3 bg-white/5 border-white/10 text-white placeholder:text-white/40"
+                placeholder="validation-results"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="submit"
+              onClick={handleExportConfirm}
+              className="bg-green-600/80 hover:bg-green-600/90 text-white"
+            >
+              Export Report
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

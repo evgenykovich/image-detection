@@ -182,12 +182,10 @@ export const validateImageByFolder = async (
   imageBase64: string,
   path: string,
   useVectorStore: boolean = true,
-  isTrainingMode: boolean = false,
-  validateWithRules: boolean = true
+  isTrainingMode: boolean = false
 ): Promise<ValidationResponse> => {
   console.log('Validating image with vector store:', useVectorStore)
   console.log('Training mode:', isTrainingMode)
-  console.log('Rules validation:', validateWithRules)
 
   try {
     const response = await fetch('/api/validate-image', {
@@ -200,16 +198,15 @@ export const validateImageByFolder = async (
         folderPath: path,
         useVectorStore,
         isTrainingMode,
-        validateWithRules,
       }),
     })
 
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || 'Failed to validate image')
+      throw new Error('Failed to validate image')
     }
 
-    return await response.json()
+    const data = await response.json()
+    return data
   } catch (error) {
     console.error('Error validating image:', error)
     throw error

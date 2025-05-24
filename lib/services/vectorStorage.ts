@@ -61,8 +61,28 @@ export async function storeValidationCase(
     }
 
     // Add diagnosis if it's not too long
-    const diagnosisValue =
-      diagnosis.length > 500 ? diagnosis.substring(0, 500) + '...' : diagnosis
+    let diagnosisValue = diagnosis
+    if (typeof diagnosis === 'string') {
+      // Clean any markdown code block markers and trim whitespace
+      diagnosisValue = diagnosis.replace(/```json\n|\n```/g, '').trim()
+      try {
+        // If it's a JSON string, parse it and stringify it cleanly
+        const parsedDiagnosis = JSON.parse(diagnosisValue)
+        diagnosisValue = JSON.stringify(parsedDiagnosis)
+      } catch (e) {
+        // If not valid JSON, use as is after cleaning markdown
+        console.warn('Diagnosis is not valid JSON, using cleaned string')
+      }
+    } else {
+      // If diagnosis is already an object, stringify it cleanly
+      diagnosisValue = JSON.stringify(diagnosis)
+    }
+
+    // Truncate if too long
+    diagnosisValue =
+      diagnosisValue.length > 500
+        ? diagnosisValue.substring(0, 500) + '...'
+        : diagnosisValue
     const tempMetadata = { ...metadata, diagnosis: diagnosisValue }
     const metadataSize = new TextEncoder().encode(
       JSON.stringify(tempMetadata)
