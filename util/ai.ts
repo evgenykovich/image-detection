@@ -1,6 +1,9 @@
 import { OpenAI } from 'openai'
 import { z } from 'zod'
+import Sharp from 'sharp'
 import AWS from 'aws-sdk'
+import * as xlsx from 'xlsx'
+import { promises as fs } from 'fs'
 import { OpenAI as langChainOpenAI } from 'langchain/llms/openai'
 import { LLMChain } from 'langchain/chains'
 import { PromptTemplate } from 'langchain/prompts'
@@ -15,9 +18,6 @@ import {
   addImagePrefix,
 } from './helpers'
 import { ValidationResponse } from '@/types/validation'
-
-const googleAPIKey = process.env.GOOGLE_AI_API_KEY
-const claudeAPIKey = process.env.CLAUDE_API_KEY
 
 AWS.config.update({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -100,7 +100,39 @@ export const detectFacesFromImageOpenAI = async (imageBase64: string) => {
     const response = await rekognition.detectFaces(params).promise()
 
     if (response.FaceDetails && response.FaceDetails.length > 0) {
-      return imageBase64
+      const image = Sharp(imageBuffer)
+      const metadata = await image.metadata()
+
+      if (!metadata.width || !metadata.height) {
+        throw new Error('Unable to get image dimensions')
+      }
+
+      const faces = response.FaceDetails.map((face) => {
+        if (face.BoundingBox) {
+          const { Width, Height, Left, Top } = face.BoundingBox
+          return {
+            boundingBox: {
+              left: Math.max(
+                0,
+                Math.round((Left || 0) * (metadata.width || 0))
+              ),
+              top: Math.max(0, Math.round((Top || 0) * (metadata.height || 0))),
+              width: Math.min(
+                metadata.width || 0,
+                Math.round((Width || 0) * (metadata.width || 0))
+              ),
+              height: Math.min(
+                metadata.height || 0,
+                Math.round((Height || 0) * (metadata.height || 0))
+              ),
+            },
+          }
+        }
+        return null
+      }).filter((face) => face !== null)
+
+      const blurredImageBase64 = await blurFaceInImage(imageBase64, faces)
+      return blurredImageBase64
     }
 
     return imageBase64
@@ -393,4 +425,130 @@ export const measurments = async (imageBase64: string, items: string[]) => {
   console.log(response.choices[0])
 
   return response.choices[0]
+}
+
+/**
+ * Loads the glossary from an Excel file.
+ * @async
+ * @function loadGlossary
+ * @param {string} glossaryFilePath - The path to the glossary file.
+ * @returns {Promise<GlossaryEntryItem>} - A promise that resolves to an object representing the glossary.
+ */
+const loadGlossary = async (
+  glossaryFilePath: string
+): Promise<GlossaryEntryItem> => {
+  const fileContent = await fs.readFile(glossaryFilePath)
+  const workbook = xlsx.read(fileContent, { type: 'buffer' })
+  const sheetName = workbook.SheetNames[0]
+  const sheet = workbook.Sheets[sheetName]
+  const rawData = xlsx.utils.sheet_to_json(sheet)
+
+  const glossary: GlossaryEntryItem = {}
+
+  rawData.forEach((row: any) => {
+    const term = row['Column1']
+    if (!term) return
+
+    glossary[term] = {}
+
+    Object.keys(row).forEach((key) => {
+      if (key !== 'Column1') {
+        const lang = mapColumnToLang(key)
+        glossary[term][lang] = row[key] || ''
+      }
+    })
+  })
+
+  return glossary
+}
+
+/**
+ * Translates text using a glossary if provided.
+ * @async
+ * @function translateWithGlossary
+ * @param {string} text - The text to translate.
+ * @param {string | undefined} glossaryFilePath - The path to the glossary file.
+ * @param {string} sourceLang - The source language.
+ * @param {string} targetLang - The target language.
+ * @returns {Promise<string>} - A promise that resolves to the translated text.
+ */
+export const translateWithGlossary = async (
+  text: string,
+  glossaryFilePath: string | undefined,
+  sourceLang: string,
+  targetLang: string
+): Promise<string> => {
+  const model = new langChainOpenAI({
+    temperature: 0,
+    modelName: 'gpt-4o-mini',
+    openAIApiKey: process.env.OPENAI_API_KEY,
+  })
+
+  let modifiedText = text
+  let promptTemplate: PromptTemplate
+  let glossaryReplacements: { [key: string]: string } = {}
+  let placeholderCounter = 0
+
+  if (glossaryFilePath) {
+    const glossary = await loadGlossary(glossaryFilePath)
+    const pattern = Object.keys(glossary)
+      .sort((a, b) => b.length - a.length)
+      .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|')
+    const regex = new RegExp(`\\b(${pattern})s?\\b`, 'gi')
+
+    // First pass: Replace glossary terms with placeholders and store the translations
+    modifiedText = text.replace(regex, (match) => {
+      const term = match.replace(/s$/, '')
+      const translation = findTranslation(glossary as any, targetLang, term)
+      if (translation) {
+        const placeholder = `__GLOSSARY_${placeholderCounter}__`
+        const finalTranslation =
+          match.endsWith('s') && !translation.endsWith('s')
+            ? translation + 's'
+            : translation
+        glossaryReplacements[placeholder] = finalTranslation
+        placeholderCounter++
+        return placeholder
+      }
+      return match
+    })
+
+    promptTemplate = new PromptTemplate({
+      template: `Translate the following text from {sourceLang} to {targetLang}. DO NOT translate any text between double underscores (like __GLOSSARY_0__). Provide only the translation, without any additional text:
+      
+      {text}`,
+      inputVariables: ['sourceLang', 'targetLang', 'text'],
+    })
+  } else {
+    promptTemplate = new PromptTemplate({
+      template: `Translate the following text literally from {sourceLang} to {targetLang}. Provide only the translation, without any additional text:
+      
+      {text}`,
+      inputVariables: ['sourceLang', 'targetLang', 'text'],
+    })
+  }
+
+  const chain = new LLMChain({
+    llm: model,
+    prompt: promptTemplate,
+  })
+
+  const result = await chain.call({
+    sourceLang,
+    targetLang,
+    text: modifiedText,
+  })
+
+  // Replace placeholders with their translations
+  let finalText = result.text.trim()
+  if (Object.keys(glossaryReplacements).length > 0) {
+    Object.entries(glossaryReplacements).forEach(
+      ([placeholder, translation]) => {
+        finalText = finalText.replace(placeholder, translation)
+      }
+    )
+  }
+
+  return finalText
 }
