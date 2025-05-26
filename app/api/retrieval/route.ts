@@ -20,6 +20,13 @@ const getPdfBuffer = async (
   throw new Error('No file or URL provided')
 }
 
+const bufferToFile = (
+  buffer: Buffer,
+  filename: string = 'document.pdf'
+): File => {
+  return new File([buffer], filename, { type: 'application/pdf' })
+}
+
 export const POST = async (request: any) => {
   const formData = await request.formData()
   const file = formData.get('file')
@@ -47,7 +54,9 @@ export const POST = async (request: any) => {
     )
   }
 
-  const answer = await qa(question, pdfBuffer)
+  // Convert buffer to File object
+  const pdfFile = bufferToFile(pdfBuffer)
+  const answer = await qa(question, pdfFile)
 
   return new NextResponse(JSON.stringify({ answer }), {
     status: 200,

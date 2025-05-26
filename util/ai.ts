@@ -1,17 +1,12 @@
 import { OpenAI } from 'openai'
 import { z } from 'zod'
-import AWS from 'aws-sdk'
-import pdf from 'pdf-parse'
-import * as xlsx from 'xlsx'
 import Sharp from 'sharp'
+import AWS from 'aws-sdk'
+import * as xlsx from 'xlsx'
 import { promises as fs } from 'fs'
 import { OpenAI as langChainOpenAI } from 'langchain/llms/openai'
 import { LLMChain } from 'langchain/chains'
 import { PromptTemplate } from 'langchain/prompts'
-import { Document } from 'langchain/document'
-import { loadQARefineChain } from 'langchain/chains'
-import { OpenAIEmbeddings } from 'langchain/embeddings/openai'
-import { MemoryVectorStore } from 'langchain/vectorstores/memory'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import Anthropic from '@anthropic-ai/sdk'
 import { AIAction, mimeType } from './enums'
@@ -20,10 +15,9 @@ import {
   blurFaceInImage,
   findTranslation,
   mapColumnToLang,
+  addImagePrefix,
 } from './helpers'
-
-const googleAPIKey = process.env.GOOGLE_AI_API_KEY
-const claudeAPIKey = process.env.CLAUDE_API_KEY
+import { ValidationResponse } from '@/types/validation'
 
 AWS.config.update({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -34,6 +28,58 @@ AWS.config.update({
 interface GlossaryEntryItem {
   [key: string]: {
     [lang: string]: string
+  }
+}
+
+interface ValidationConfig {
+  category: string
+  expectedState: string
+  prompt: string
+}
+
+const getValidationConfig = (folderPath: string): ValidationConfig => {
+  const parts = folderPath.split('/')
+  const categoryFolder = parts.find((p) => /^\d{2}-/.test(p)) || ''
+  const stateFolder =
+    parts.find((p) =>
+      /(Present|Missing|Visible|No |Has |Bent|Straight|38inch)/.test(p)
+    ) || ''
+
+  const category = categoryFolder.replace(/^\d{2}-/, '')
+  const expectedState = stateFolder.replace(/^\d{2}-/, '')
+  debugger
+  console.log(category, expectedState)
+  let prompt = ''
+  switch (category.toLowerCase()) {
+    case 'corrosion':
+      prompt = `Analyze this image and determine if there is any visible corrosion. Focus on signs of rust, deterioration, or surface degradation. The image should show ${expectedState.toLowerCase()}.`
+      break
+    case 'threads':
+      prompt = `Examine this image and determine if there are visible threads on the component. The threads should be ${expectedState.toLowerCase()}.`
+      break
+    case 'connector plates':
+      prompt = `Analyze this image and determine if the connector plate is ${expectedState.toLowerCase()}. Look for any bending, straightness, or deformation.`
+      break
+    case 'cotter pins':
+      prompt = `Examine this image and determine if the cotter pins are ${expectedState.toLowerCase()}. Look for the presence or absence of cotter pins in the assembly.`
+      break
+    case 'spacer plates':
+      prompt = `Analyze this image and determine if the spacer plates are ${expectedState.toLowerCase()}. Check for proper placement and presence of spacer plates.`
+      break
+    case 'postitive connection':
+      prompt = `Examine this image and verify if the bolts are ${expectedState.toLowerCase()}. Check for proper bolt installation and presence.`
+      break
+    case 'cable diameter':
+      prompt = `Measure and verify if the cable diameter meets the minimum 38-inch requirement. Look for any signs that indicate the cable diameter is insufficient.`
+      break
+    default:
+      prompt = `Analyze this image and determine if it shows ${expectedState.toLowerCase()} for ${category.toLowerCase()}.`
+  }
+
+  return {
+    category,
+    expectedState,
+    prompt,
   }
 }
 
@@ -96,6 +142,291 @@ export const detectFacesFromImageOpenAI = async (imageBase64: string) => {
   }
 }
 
+export const qa = async (question: string, pdfFile: File) => {
+  try {
+    const formData = new FormData()
+    formData.append('pdf', pdfFile)
+    formData.append('question', question)
+
+    const response = await fetch('/api/pdf', {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to process PDF')
+    }
+
+    const data = await response.json()
+    return data.answer
+  } catch (error) {
+    console.error('Error in PDF QA:', error)
+    throw error
+  }
+}
+
+const FieldValueSchema = z.object({
+  field: z.string(),
+  value: z.string(),
+})
+
+const FieldValuesArraySchema = z.array(FieldValueSchema)
+
+export const getValueFromFieldsInImage = async (
+  imageBase64: string,
+  fields: string[]
+) => {
+  const model = new langChainOpenAI({
+    modelName: 'gpt-4o',
+    temperature: 0,
+  })
+
+  const prompt = `Please analyze this image and extract the value of the following fields: ${fields.join(
+    ', '
+  )}. Return the results as a JSON array of objects, where each object has a 'field' and a 'value' property.`
+
+  const response = await model.call([
+    {
+      type: 'text',
+      text: prompt,
+    },
+    {
+      type: 'image_url',
+      image_url: {
+        url: imageBase64,
+      },
+    },
+  ] as any)
+
+  try {
+    const cleanedResponse = response.replace(/```json\n|\n```/g, '').trim()
+    const validatedResponse = FieldValuesArraySchema.parse(
+      JSON.parse(cleanedResponse)
+    )
+    return validatedResponse
+  } catch (error) {
+    console.error('Error parsing or validating response:', error)
+    throw new Error('Failed to process the AI response')
+  }
+}
+
+export const validateImageByFolder = async (
+  imageBase64: string,
+  path: string,
+  useVectorStore: boolean = true,
+  isTrainingMode: boolean = false
+): Promise<ValidationResponse> => {
+  console.log('Validating image with vector store:', useVectorStore)
+  console.log('Training mode:', isTrainingMode)
+
+  try {
+    const response = await fetch('/api/validate-image', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        imageBase64,
+        folderPath: path,
+        useVectorStore,
+        isTrainingMode,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to validate image')
+    }
+
+    const data = await response.json()
+    return data
+  } catch (error) {
+    console.error('Error validating image:', error)
+    throw error
+  }
+}
+
+export const detect = async (imageBase64: string, items: string[]) => {
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+
+  const prompt = `Please analyze this image and detect if the following items are in the image: ${items.join(
+    ', '
+  )}`
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: prompt,
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: addImagePrefix(imageBase64),
+              },
+            },
+          ],
+        },
+      ],
+      max_tokens: 300,
+    })
+
+    return response.choices[0].message.content
+  } catch (error) {
+    console.error('Error in OpenAI detect:', error)
+    throw error
+  }
+}
+
+export const geminiDetectImage = async (
+  imageBase64: string,
+  action = AIAction.DETECT,
+  items: string[]
+) => {
+  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY as string)
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' })
+
+    let prompt = ''
+    switch (action) {
+      case AIAction.DETECT:
+        prompt = `Please analyze this image and detect if the following items are in the image: ${items.join(
+          ','
+        )}`
+        break
+      case AIAction.MEASURMENTS:
+        prompt = `Please analyze this image and provide the rough measurements of either the items specified: ${items.join(
+          ','
+        )} and or the things you see in the image using rough estimates based on the items that might be in the image.`
+        break
+      default:
+        break
+    }
+
+    const image = {
+      inlineData: {
+        data: imageBase64.split(',')[1],
+        mimeType: mimeType.JPEG,
+      },
+    }
+
+    const result = await model.generateContent([prompt, image])
+    return result.response.text()
+  } catch (error) {
+    console.error('Error initializing Gemini', error)
+  }
+}
+
+export const claudeDetectImage = async (
+  imageBase64: string,
+  action = AIAction.DETECT,
+  items: string[]
+) => {
+  const anthropic = new Anthropic({
+    apiKey: process.env.CLAUDE_API_KEY as string,
+  })
+  try {
+    let prompt = ''
+    switch (action) {
+      case AIAction.DETECT:
+        prompt = `Please analyze this image and detect if the following items are in the image: ${items.join(
+          ','
+        )}`
+        break
+      case AIAction.MEASURMENTS:
+        prompt = `Please analyze this image and provide the rough measurements of either the items specified: ${items.join(
+          ','
+        )} and or the things you see in the image using rough estimates based on the items that might be in the image.`
+        break
+      default:
+        break
+    }
+
+    const message = await anthropic.messages.create({
+      model: 'claude-3-opus-20240229',
+      max_tokens: 1024,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: mimeType.JPEG,
+                data: imageBase64.split(',')[1],
+              },
+            },
+            { type: 'text', text: prompt },
+          ],
+        },
+      ],
+    })
+
+    return message.content[0].text
+  } catch (error) {
+    console.error('Error initializing Claude', error)
+  }
+}
+
+export const awsRekognitionDetectImage = async (
+  imageBase64: string,
+  items: string[]
+) => {
+  const rekognition = new AWS.Rekognition()
+  const imageBase64Data = base64Helper(imageBase64)
+
+  const params = {
+    Image: {
+      Bytes: Buffer.from(imageBase64Data, 'base64'),
+    },
+    MaxLabels: 10,
+    MinConfidence: 70,
+  }
+
+  const response = await rekognition.detectLabels(params).promise()
+
+  const detectedItems = response.Labels?.map((label: any) => label.Name)
+
+  return detectedItems?.join(', ')
+}
+
+export const measurments = async (imageBase64: string, items: string[]) => {
+  const openai = new OpenAI()
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: `please analyze this image and provide the rough measurments of either the items specified: ${items.join(
+              ','
+            )} and or the things you see in the image using rough estimates based on the items that might be in the image.`,
+          },
+          {
+            type: 'image_url',
+            image_url: {
+              url: imageBase64,
+            },
+          },
+        ],
+      },
+    ],
+  })
+  console.log(response.choices[0])
+
+  return response.choices[0]
+}
+
 /**
  * Loads the glossary from an Excel file.
  * @async
@@ -155,6 +486,9 @@ export const translateWithGlossary = async (
 
   let modifiedText = text
   let promptTemplate: PromptTemplate
+  let glossaryReplacements: { [key: string]: string } = {}
+  let placeholderCounter = 0
+
   if (glossaryFilePath) {
     const glossary = await loadGlossary(glossaryFilePath)
     const pattern = Object.keys(glossary)
@@ -163,19 +497,25 @@ export const translateWithGlossary = async (
       .join('|')
     const regex = new RegExp(`\\b(${pattern})s?\\b`, 'gi')
 
+    // First pass: Replace glossary terms with placeholders and store the translations
     modifiedText = text.replace(regex, (match) => {
       const term = match.replace(/s$/, '')
       const translation = findTranslation(glossary as any, targetLang, term)
       if (translation) {
-        return match.endsWith('s') && !translation.endsWith('s')
-          ? translation + 's'
-          : translation
+        const placeholder = `__GLOSSARY_${placeholderCounter}__`
+        const finalTranslation =
+          match.endsWith('s') && !translation.endsWith('s')
+            ? translation + 's'
+            : translation
+        glossaryReplacements[placeholder] = finalTranslation
+        placeholderCounter++
+        return placeholder
       }
       return match
     })
 
     promptTemplate = new PromptTemplate({
-      template: `Translate the following text from {sourceLang} to {targetLang}. Provide only the translation, without any additional text:
+      template: `Translate the following text from {sourceLang} to {targetLang}. DO NOT translate any text between double underscores (like __GLOSSARY_0__). Provide only the translation, without any additional text:
       
       {text}`,
       inputVariables: ['sourceLang', 'targetLang', 'text'],
@@ -199,250 +539,16 @@ export const translateWithGlossary = async (
     targetLang,
     text: modifiedText,
   })
-  return result.text.trim()
-}
 
-const extractTextFromPDF = async (pdfBuffer: Buffer): Promise<string> => {
-  const data = await pdf(pdfBuffer)
-  return data.text
-}
-
-export const qa = async (question: string, pdfBuffer: Buffer) => {
-  const content = await extractTextFromPDF(pdfBuffer)
-
-  const doc = new Document({
-    pageContent: content,
-    metadata: { id: 'pdf-doc', createdAt: new Date() },
-  })
-
-  const model = new langChainOpenAI({
-    temperature: 0,
-    modelName: 'gpt-4o-mini',
-  })
-
-  const chain = loadQARefineChain(model)
-  const embeddings = new OpenAIEmbeddings()
-  const store = await MemoryVectorStore.fromDocuments([doc], embeddings)
-  const relevantDocs = await store.similaritySearch(question)
-  const res = await chain.call({
-    input_documents: relevantDocs,
-    question,
-  })
-
-  return res.output_text
-}
-
-const FieldValueSchema = z.object({
-  field: z.string(),
-  value: z.string(),
-})
-
-const FieldValuesArraySchema = z.array(FieldValueSchema)
-
-export const getValueFromFieldsInImage = async (
-  imageBase64: string,
-  fields: string[]
-) => {
-  const model = new langChainOpenAI({
-    modelName: 'gpt-4o',
-    temperature: 0,
-  })
-
-  const prompt = `Please analyze this image and extract the value of the following fields: ${fields.join(
-    ', '
-  )}. Return the results as a JSON array of objects, where each object has a 'field' and a 'value' property.`
-
-  const response = await model.call([
-    {
-      type: 'text',
-      text: prompt,
-    },
-    {
-      type: 'image_url',
-      image_url: {
-        url: imageBase64,
-      },
-    },
-  ] as any)
-
-  try {
-    const cleanedResponse = response.replace(/```json\n|\n```/g, '').trim()
-    const validatedResponse = FieldValuesArraySchema.parse(
-      JSON.parse(cleanedResponse)
+  // Replace placeholders with their translations
+  let finalText = result.text.trim()
+  if (Object.keys(glossaryReplacements).length > 0) {
+    Object.entries(glossaryReplacements).forEach(
+      ([placeholder, translation]) => {
+        finalText = finalText.replace(placeholder, translation)
+      }
     )
-    return validatedResponse
-  } catch (error) {
-    console.error('Error parsing or validating response:', error)
-    throw new Error('Failed to process the AI response')
-  }
-}
-
-export const detect = async (imageBase64: string, items: string[]) => {
-  const model = new langChainOpenAI({
-    modelName: 'gpt-4o',
-    temperature: 0,
-  })
-
-  const prompt = `Please analyze this image and detect if the following items are in the image: ${items.join(
-    ', '
-  )}`
-
-  const response = await model.call([
-    {
-      type: 'text',
-      text: prompt,
-    },
-    {
-      type: 'image_url',
-      image_url: {
-        url: imageBase64,
-      },
-    },
-  ] as any)
-
-  return response
-}
-
-export const measurments = async (imageBase64: string, items: string[]) => {
-  const openai = new OpenAI()
-
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: `please analyze this image and provide the rough measurments of either the items specified: ${items.join(
-              ','
-            )} and or the things you see in the image using rough estimates based on the items that might be in the image.`,
-          },
-          {
-            type: 'image_url',
-            image_url: {
-              url: imageBase64,
-            },
-          },
-        ],
-      },
-    ],
-  })
-  console.log(response.choices[0])
-
-  return response.choices[0]
-}
-
-export const geminiDetectImage = async (
-  imageBase64: string,
-  action = AIAction.DETECT,
-  items: string[]
-) => {
-  const imageBase64Data = base64Helper(imageBase64)
-  const genAI = new GoogleGenerativeAI(googleAPIKey as string)
-  try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' })
-
-    let prompt = ''
-
-    switch (action) {
-      case AIAction.DETECT:
-        prompt = `please analyze this image and detect if the following items are in the image: ${items.join(
-          ','
-        )}`
-        break
-      case AIAction.MEASURMENTS:
-        prompt = `please analyze this image and provide the rough measurments of either the items specified: ${items.join(
-          ','
-        )} and or the things you see in the image using rough estimates based on the items that might be in the image.`
-        break
-      default:
-        break
-    }
-
-    const image = {
-      inlineData: {
-        data: imageBase64Data,
-        mimeType: mimeType.JPEG,
-      },
-    }
-
-    const result = await model.generateContent([prompt, image])
-    return result.response.text()
-  } catch (error) {
-    console.error('Error initializing Gemini', error)
-  }
-}
-
-export const claudeDetectImage = async (
-  imageBase64: string,
-  action = AIAction.DETECT,
-  items: string[]
-) => {
-  const anthropic = new Anthropic({ apiKey: claudeAPIKey as string })
-  const imageBase64Data = base64Helper(imageBase64)
-  let prompt = ''
-
-  try {
-    switch (action) {
-      case AIAction.DETECT:
-        prompt = `please analyze this image and detect if the following items are in the image: ${items.join(
-          ','
-        )}`
-        break
-      case AIAction.MEASURMENTS:
-        prompt = `please analyze this image and provide the rough measurments of either the items specified: ${items.join(
-          ','
-        )} and or the things you see in the image using rough estimates based on the items that might be in the image.`
-        break
-      default:
-        break
-    }
-    const message = await anthropic.messages.create({
-      model: 'claude-3-opus-20240229',
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mimeType.JPEG,
-                data: imageBase64Data,
-              },
-            },
-            { type: 'text', text: prompt },
-          ],
-        },
-      ],
-    })
-
-    return message.content[0].text
-  } catch (error) {
-    console.error('Error initializing Claude', error)
-  }
-}
-
-export const awsRekognitionDetectImage = async (
-  imageBase64: string,
-  items: string[]
-) => {
-  const rekognition = new AWS.Rekognition()
-  const imageBase64Data = base64Helper(imageBase64)
-
-  const params = {
-    Image: {
-      Bytes: Buffer.from(imageBase64Data, 'base64'),
-    },
-    MaxLabels: 10,
-    MinConfidence: 70,
   }
 
-  const response = await rekognition.detectLabels(params).promise()
-
-  const detectedItems = response.Labels?.map((label: any) => label.Name)
-
-  return detectedItems?.join(', ')
+  return finalText
 }
