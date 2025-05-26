@@ -217,8 +217,6 @@ export const UploadZip = () => {
   >('validation')
   const [useVectorStore, setUseVectorStore] = useState(true)
 
-  const useAI = useAtomValue(aiInUse)
-
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false)
   const [exportFileName, setExportFileName] = useState('validation-results')
 
