@@ -305,7 +305,6 @@ export async function validateImage(
                 result.diagnosis.overall_assessment = 'Valid'
                 result.diagnosis.confidence_level = mostSimilar.confidence
 
-                // Add category-specific context for the match
                 const contextByCategory: { [key: string]: string } = {
                   connector_plates:
                     'Connector plate alignment and mounting match reference standard',

@@ -22,7 +22,6 @@ async function initPineconeIndex() {
   } catch (error) {
     console.log(`Creating new index: ${indexName}`)
 
-    // Create a new index with increased dimension for visual features
     await pinecone.createIndex({
       name: indexName,
       dimension: 1536, // Matches text-embedding-3-small dimension

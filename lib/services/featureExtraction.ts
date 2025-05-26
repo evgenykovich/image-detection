@@ -34,7 +34,6 @@ function generateImageDescription(features: any): string {
 export async function extractImageFeatures(
   imageBuffer: Buffer
 ): Promise<ImageFeatures> {
-  // Extract raw image features
   const image = sharp(imageBuffer)
   const metadata = await image.metadata()
   const stats = await image.stats()
@@ -57,7 +56,6 @@ export async function extractImageFeatures(
     })
     .stats()
 
-  // Generate text description
   const description = generateImageDescription({
     stats,
     edges,
@@ -65,7 +63,6 @@ export async function extractImageFeatures(
     metadata,
   })
 
-  // Get embedding from text-embedding-3-small
   const embedding = await openai.embeddings.create({
     model: 'text-embedding-3-small',
     input: description,
