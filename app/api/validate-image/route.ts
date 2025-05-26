@@ -1,6 +1,13 @@
+let Sharp: any
+
+if (typeof window === 'undefined') {
+  Sharp = require('sharp')
+} else {
+  Sharp = null
+}
+
 import { validateImage } from '@/lib/services/validation'
 import { Category, State } from '@/types/validation'
-import sharp from 'sharp'
 
 function normalizeCategoryName(folderPath: string): string {
   const parts = folderPath.split('/')
@@ -127,7 +134,11 @@ async function processImageBuffer(base64Image: string): Promise<Buffer> {
     }
 
     // Try to determine format and process with Sharp
-    const image = sharp(buffer)
+    if (!Sharp) {
+      throw new Error('Sharp is not available on the client side')
+    }
+
+    const image = Sharp(buffer)
     const metadata = await image.metadata()
 
     if (!metadata.format) {

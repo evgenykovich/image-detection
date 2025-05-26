@@ -6,6 +6,19 @@ import { loadQARefineChain } from 'langchain/chains'
 import { OpenAIEmbeddings } from 'langchain/embeddings/openai'
 import { MemoryVectorStore } from 'langchain/vectorstores/memory'
 
+// Initialize OpenAI and chain at request time to avoid build-time issues
+const initializeAI = () => {
+  const model = new langChainOpenAI({
+    temperature: 0,
+    modelName: 'gpt-4o-mini',
+  })
+  return {
+    model,
+    chain: loadQARefineChain(model),
+    embeddings: new OpenAIEmbeddings(),
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData()
@@ -28,13 +41,7 @@ export async function POST(request: Request) {
       metadata: { id: 'pdf-doc', createdAt: new Date() },
     })
 
-    const model = new langChainOpenAI({
-      temperature: 0,
-      modelName: 'gpt-4o-mini',
-    })
-
-    const chain = loadQARefineChain(model)
-    const embeddings = new OpenAIEmbeddings()
+    const { chain, embeddings } = initializeAI()
     const store = await MemoryVectorStore.fromDocuments([doc], embeddings)
     const relevantDocs = await store.similaritySearch(question)
     const res = await chain.call({

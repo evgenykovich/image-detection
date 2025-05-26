@@ -1,7 +1,15 @@
 import { Pinecone } from '@pinecone-database/pinecone'
 import { readdir, readFile } from 'fs/promises'
 import { join, basename } from 'path'
-import sharp from 'sharp'
+
+let Sharp: any
+
+if (typeof window === 'undefined') {
+  Sharp = require('sharp')
+} else {
+  Sharp = null
+}
+
 import { extractImageFeatures } from '@/lib/services/featureExtraction'
 import { storeValidationCase } from '@/lib/services/vectorStorage'
 import { Category, State } from '@/types/validation'

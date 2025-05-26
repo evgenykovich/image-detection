@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react'
 import { useAtomValue } from 'jotai'
-import { ProgressBar } from 'primereact/progressbar'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -24,7 +23,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { aiInUse } from '@/store'
-import { validateImageByFolder } from '@/util/ai'
 import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import { DropZoneUpload } from '../DropZoneUpload'
@@ -240,12 +238,25 @@ export const UploadZip = () => {
   ): Promise<ValidationResult> => {
     try {
       const base64Image = await convertToBase64(imageBlob)
-      const validationResult = await validateImageByFolder(
-        base64Image,
-        path,
-        useVectorStore,
-        validationMode === 'training'
-      )
+
+      const response = await fetch('/api/validate-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          imageBase64: base64Image,
+          folderPath: path,
+          useVectorStore,
+          isTrainingMode: validationMode === 'training',
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to validate image')
+      }
+
+      const validationResult = await response.json()
 
       // Parse diagnosis if it's a JSON string
       let parsedDiagnosis: DiagnosisObject | undefined = undefined
@@ -329,23 +340,25 @@ export const UploadZip = () => {
         features: validationResult.features,
         matchedCriteria,
         failedCriteria: parsedDiagnosis?.failed_criteria || [],
-        similarCases: validationResult.similarCases?.map((c) => {
-          if (c.diagnosis && typeof c.diagnosis === 'string') {
-            try {
-              const diagStr = c.diagnosis.replace(/```json\n|\n```/g, '')
-              const parsed = JSON.parse(diagStr)
-              if (typeof parsed === 'object') {
-                return {
-                  ...c,
-                  diagnosis: parsed as DiagnosisObject,
+        similarCases: validationResult.similarCases?.map(
+          (c: ValidationResponse['similarCases'][0]) => {
+            if (c.diagnosis && typeof c.diagnosis === 'string') {
+              try {
+                const diagStr = c.diagnosis.replace(/```json\n|\n```/g, '')
+                const parsed = JSON.parse(diagStr)
+                if (typeof parsed === 'object') {
+                  return {
+                    ...c,
+                    diagnosis: parsed as DiagnosisObject,
+                  }
                 }
+              } catch (e) {
+                console.warn('Failed to parse similar case diagnosis:', e)
               }
-            } catch (e) {
-              console.warn('Failed to parse similar case diagnosis:', e)
             }
+            return c
           }
-          return c
-        }),
+        ),
       }
     } catch (error) {
       console.error('Error processing image:', error)

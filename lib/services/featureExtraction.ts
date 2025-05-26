@@ -1,4 +1,11 @@
-import sharp from 'sharp'
+let Sharp: any
+
+if (typeof window === 'undefined') {
+  Sharp = require('sharp')
+} else {
+  Sharp = null
+}
+
 import { ImageFeatures } from '@/types/validation'
 import OpenAI from 'openai'
 
@@ -34,7 +41,11 @@ function generateImageDescription(features: any): string {
 export async function extractImageFeatures(
   imageBuffer: Buffer
 ): Promise<ImageFeatures> {
-  const image = sharp(imageBuffer)
+  if (!Sharp) {
+    throw new Error('Sharp is not available on the client side')
+  }
+
+  const image = Sharp(imageBuffer)
   const metadata = await image.metadata()
   const stats = await image.stats()
 
@@ -73,8 +84,12 @@ export async function extractImageFeatures(
     visualFeatures: embedding.data[0].embedding,
     structuralFeatures: {
       edges: edges.channels[0].mean,
-      contrast: Math.max(...stats.channels.map((c) => c.stdev)),
-      brightness: Math.max(...stats.channels.map((c) => c.mean)),
+      contrast: Math.max(
+        ...stats.channels.map((c: { stdev: number }) => c.stdev)
+      ),
+      brightness: Math.max(
+        ...stats.channels.map((c: { mean: number }) => c.mean)
+      ),
       sharpness: Math.abs(sharpness.channels[0].mean),
     },
     metadata: {
