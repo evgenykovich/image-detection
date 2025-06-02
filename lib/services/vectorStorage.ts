@@ -30,7 +30,8 @@ export async function storeValidationCase(
   features: ImageFeatures,
   diagnosis: string,
   keyFeatures: string[],
-  confidence: number = 0.5 // Default confidence if not provided
+  confidence: number = 0.5, // Default confidence if not provided
+  prompt?: string // Add prompt parameter
 ) {
   try {
     console.log('Storing validation case:', {
@@ -58,6 +59,13 @@ export async function storeValidationCase(
       keyFeatures: JSON.stringify(
         keyFeatures.slice(0, 5).map((f) => f.substring(0, 100))
       ),
+    }
+
+    // Add prompt if provided (truncate if too long)
+    if (prompt) {
+      const truncatedPrompt =
+        prompt.length > 500 ? prompt.substring(0, 500) + '...' : prompt
+      metadata.prompt = truncatedPrompt
     }
 
     // Add diagnosis if it's not too long

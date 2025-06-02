@@ -179,6 +179,7 @@ export async function POST(req: Request) {
       folderPath,
       useVectorStore = true,
       isTrainingMode = false,
+      prompt,
     } = await req.json()
 
     if (!imageBase64 || !folderPath) {
@@ -189,6 +190,15 @@ export async function POST(req: Request) {
         { status: 400 }
       )
     }
+
+    // Log the presence of a prompt for debugging
+    console.log('Validation request:', {
+      folderPath,
+      hasPrompt: !!prompt,
+      promptLength: prompt?.length,
+      useVectorStore,
+      isTrainingMode,
+    })
 
     // Extract category and state from folder path
     const category = normalizeCategoryName(folderPath)
@@ -204,7 +214,18 @@ export async function POST(req: Request) {
         isGroundTruth: isTrainingMode,
         storeResults: isTrainingMode || useVectorStore,
         measurement, // Pass the measurement to validation
+        prompt: prompt?.trim() || undefined, // Ensure prompt is trimmed and undefined if empty
       }
+
+      // Log validation configuration
+      console.log('Starting validation with options:', {
+        category,
+        expectedState,
+        measurement,
+        hasPrompt: !!validationOptions.prompt,
+        isTrainingMode,
+        useVectorStore,
+      })
 
       // Validate the image using folder-based validation
       const result = await validateImage(
@@ -222,6 +243,8 @@ export async function POST(req: Request) {
         category,
         expectedState,
         measurement,
+        customPromptUsed: !!validationOptions.prompt,
+        promptSource: 'folder', // Indicate that this prompt came from a folder's prompt.txt
       }
 
       return new Response(JSON.stringify(response), {
