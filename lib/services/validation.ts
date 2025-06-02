@@ -14,6 +14,7 @@ interface ValidationOptions {
   isGroundTruth?: boolean
   storeResults?: boolean
   measurement?: string
+  prompt?: string
 }
 
 function buildSimplePrompt(
@@ -148,6 +149,33 @@ Important:
 Focus only on answering this specific question about ${category} being ${expectedState}.`
 }
 
+function wrapCustomPrompt(customPrompt: string): string {
+  return `${customPrompt}
+
+Please respond in JSON format with:
+{
+  "is_valid": boolean (true if the image meets the criteria),
+  "confidence": number (0-1 indicating how confident you are),
+  "diagnosis": {
+    "overall_assessment": string (brief assessment of pass/fail),
+    "confidence_level": number (0-1),
+    "key_observations": string[] (specific observations about the image),
+    "matched_criteria": string[] (criteria that were met),
+    "failed_criteria": string[] (criteria that were not met),
+    "detailed_explanation": string (detailed analysis of findings)
+  },
+  "explanation": string (concise summary of why the image passed or failed validation)
+}
+
+Important:
+- matched_criteria should ONLY include criteria that were successfully met
+- failed_criteria should include criteria that were NOT met
+- If ANY criteria fail, is_valid should be false
+- key_observations should contain specific details about what you see
+- diagnosis should provide a detailed technical assessment
+- explanation should provide a brief, clear summary of the validation result`
+}
+
 export async function validateImage(
   imageBuffer: Buffer,
   category: Category,
@@ -158,6 +186,7 @@ export async function validateImage(
     storeResults: true,
   }
 ): Promise<ValidationResult> {
+  debugger
   try {
     // Extract basic features for future reference
     const features = await extractImageFeatures(imageBuffer)
@@ -193,7 +222,8 @@ export async function validateImage(
           features,
           groundTruthResult.diagnosis.detailed_explanation,
           groundTruthResult.matchedCriteria,
-          1.0 // Ground truth confidence
+          1.0, // Ground truth confidence
+          options.prompt // Pass the prompt if provided
         )
       } catch (error) {
         console.warn('Failed to store ground truth case:', error)
@@ -203,14 +233,12 @@ export async function validateImage(
     }
 
     // Regular validation flow for non-training mode
-    const prompt = buildSimplePrompt(
-      category,
-      expectedState,
-      options.measurement
-    )
+    const basePrompt = options.prompt
+      ? wrapCustomPrompt(options.prompt)
+      : buildSimplePrompt(category, expectedState, options.measurement)
 
     // Get vision model analysis
-    const message = new HumanMessage(prompt)
+    const message = new HumanMessage(basePrompt)
     message.additional_kwargs = {
       image: imageBuffer.toString('base64'),
     }

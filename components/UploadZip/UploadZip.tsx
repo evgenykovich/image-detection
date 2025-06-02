@@ -188,6 +188,7 @@ interface FolderStructure {
   [key: string]: {
     images: { name: string; data: Blob }[]
     subfolders: string[]
+    prompt: string
   }
 }
 
@@ -210,6 +211,16 @@ export const UploadZip = () => {
   const [isExtracting, setIsExtracting] = useState(false)
   const [totalFiles, setTotalFiles] = useState(0)
   const [processedFiles, setProcessedFiles] = useState(0)
+  const [promptText, setPromptText] = useState<string>('')
+  const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false)
+  const [hasPromptFile, setHasPromptFile] = useState(false)
+  const [promptFileName, setPromptFileName] = useState<string | null>(null)
+  const [currentEditingFolder, setCurrentEditingFolder] = useState<
+    string | null
+  >(null)
+  const [foldersNeedingPrompts, setFoldersNeedingPrompts] = useState<string[]>(
+    []
+  )
 
   // Validation mode controls
   const [validationMode, setValidationMode] = useState<
@@ -236,6 +247,7 @@ export const UploadZip = () => {
   ): Promise<ValidationResult> => {
     try {
       const base64Image = await convertToBase64(imageBlob)
+      const folderPrompt = folderStructure[path]?.prompt || ''
 
       const response = await fetch('/api/validate-image', {
         method: 'POST',
@@ -247,6 +259,7 @@ export const UploadZip = () => {
           folderPath: path,
           useVectorStore,
           isTrainingMode: validationMode === 'training',
+          prompt: folderPrompt,
         }),
       })
 
@@ -398,31 +411,43 @@ export const UploadZip = () => {
     setFolderStructure({})
     setSelectedFolders([])
     setResults([])
+    setHasPromptFile(false)
+    setPromptFileName(null)
+    setPromptText('')
 
     try {
       const zip = new JSZip()
       const contents = await zip.loadAsync(file)
       const structure: FolderStructure = {}
 
-      // Process all files in the zip
+      // First pass: Create folder structure and process images
       for (const [path, zipEntry] of Object.entries(contents.files)) {
         if (!zipEntry.dir) {
-          // Check if it's an image file
-          if (/\.(jpg|jpeg|png)$/i.test(path)) {
-            const folderPath = path.split('/').slice(0, -1).join('/')
-            if (!structure[folderPath]) {
-              structure[folderPath] = { images: [], subfolders: [] }
-            }
+          const folderPath = path.split('/').slice(0, -1).join('/')
+          const fileName = path.split('/').pop()!
+
+          // Initialize folder if it doesn't exist
+          if (!structure[folderPath]) {
+            structure[folderPath] = { images: [], subfolders: [], prompt: '' }
+          }
+
+          // Process images
+          if (/\.(jpg|jpeg|png)$/i.test(fileName)) {
             const blob = await zipEntry.async('blob')
             structure[folderPath].images.push({
-              name: path.split('/').pop()!,
+              name: fileName,
               data: blob,
             })
+          }
+          // Process prompt.txt
+          else if (fileName.toLowerCase() === 'prompt.txt') {
+            const promptContent = await zipEntry.async('text')
+            structure[folderPath].prompt = promptContent
           }
         }
       }
 
-      // Process subfolder relationships
+      // Second pass: Process subfolder relationships
       Object.keys(structure).forEach((folder) => {
         Object.keys(structure).forEach((potentialParent) => {
           if (
@@ -462,6 +487,23 @@ export const UploadZip = () => {
   const handleValidate = async () => {
     if (selectedFolders.length === 0) return
 
+    // Check if any selected folders are missing prompts
+    const foldersWithoutPrompts = selectedFolders.filter(
+      (folder) => !folderStructure[folder].prompt
+    )
+
+    if (foldersWithoutPrompts.length > 0) {
+      setFoldersNeedingPrompts(foldersWithoutPrompts)
+      setCurrentEditingFolder(foldersWithoutPrompts[0])
+      setIsPromptDialogOpen(true)
+      return
+    }
+
+    // Proceed with validation if all folders have prompts
+    await processValidation()
+  }
+
+  const processValidation = async () => {
     setIsProcessing(true)
     setProgress(0)
     setResults([])
@@ -721,7 +763,35 @@ export const UploadZip = () => {
     XLSX.writeFile(workbook, `${fileName}.xlsx`)
   }
 
-  console.log(results)
+  const handlePromptEdit = (folderPath: string) => {
+    setCurrentEditingFolder(folderPath)
+    setFoldersNeedingPrompts([])
+    setIsPromptDialogOpen(true)
+  }
+
+  const handlePromptConfirm = () => {
+    if (foldersNeedingPrompts.length > 0) {
+      // Remove the current folder from the list
+      const updatedFolders = foldersNeedingPrompts.filter(
+        (folder) => folder !== currentEditingFolder
+      )
+      setFoldersNeedingPrompts(updatedFolders)
+
+      if (updatedFolders.length > 0) {
+        // Move to the next folder that needs a prompt
+        setCurrentEditingFolder(updatedFolders[0])
+      } else {
+        // All prompts are set, close dialog and start validation
+        setIsPromptDialogOpen(false)
+        setCurrentEditingFolder(null)
+        processValidation()
+      }
+    } else {
+      // Normal prompt editing mode
+      setIsPromptDialogOpen(false)
+      setCurrentEditingFolder(null)
+    }
+  }
 
   return (
     <div className="w-full max-w-4xl space-y-6">
@@ -942,7 +1012,7 @@ export const UploadZip = () => {
             <ScrollArea className="h-[300px] rounded-md border border-white/10 bg-white/5">
               <div className="space-y-4 p-4">
                 {Object.entries(folderStructure).map(
-                  ([folderPath, { images, subfolders }]) => (
+                  ([folderPath, { images, subfolders, prompt }]) => (
                     <div
                       key={folderPath}
                       className="flex items-start space-x-4 p-2 rounded-lg hover:bg-white/5 transition-colors"
@@ -955,7 +1025,7 @@ export const UploadZip = () => {
                         className="text-white"
                       />
                       <Folder className="h-4 w-4 mt-0.5 text-white/70" />
-                      <div className="grid gap-1.5 leading-none text-white">
+                      <div className="grid gap-1.5 leading-none text-white flex-grow">
                         <label
                           htmlFor={folderPath}
                           className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
@@ -968,8 +1038,21 @@ export const UploadZip = () => {
                             `, ${subfolders.length} subfolder${
                               subfolders.length !== 1 ? 's' : ''
                             }`}
+                          {prompt && (
+                            <span className="ml-2 text-blue-400">
+                              (Has prompt.txt)
+                            </span>
+                          )}
                         </p>
                       </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePromptEdit(folderPath)}
+                        className="bg-white/5 hover:bg-white/10 text-white"
+                      >
+                        {prompt ? 'Edit Prompt' : 'Add Prompt'}
+                      </Button>
                     </div>
                   )
                 )}
@@ -1348,6 +1431,78 @@ export const UploadZip = () => {
           )}
         </div>
       )}
+
+      <Dialog
+        open={isPromptDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && foldersNeedingPrompts.length > 0) {
+            // Prevent closing if we still have folders needing prompts
+            return
+          }
+          setIsPromptDialogOpen(open)
+          if (!open) {
+            setCurrentEditingFolder(null)
+            setFoldersNeedingPrompts([])
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[600px] bg-gray-900/95 border border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-white">
+              {foldersNeedingPrompts.length > 0
+                ? `Folder Requires Prompt (${foldersNeedingPrompts.length} remaining)`
+                : folderStructure[currentEditingFolder || '']?.prompt
+                ? 'Edit Folder Prompt'
+                : 'Add Folder Prompt'}
+            </DialogTitle>
+            <DialogDescription className="text-white/70">
+              {foldersNeedingPrompts.length > 0
+                ? `Please provide a validation prompt for folder: ${currentEditingFolder}`
+                : currentEditingFolder
+                ? `Edit the validation prompt for folder: ${currentEditingFolder}`
+                : 'Add a validation prompt for this folder'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="prompt" className="text-white/90">
+                Prompt
+              </Label>
+              <textarea
+                id="prompt"
+                value={
+                  folderStructure[currentEditingFolder || '']?.prompt || ''
+                }
+                onChange={(e) => {
+                  if (currentEditingFolder) {
+                    setFolderStructure((prev) => ({
+                      ...prev,
+                      [currentEditingFolder]: {
+                        ...prev[currentEditingFolder],
+                        prompt: e.target.value,
+                      },
+                    }))
+                  }
+                }}
+                className="min-h-[200px] w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white placeholder:text-white/40"
+                placeholder="Enter your validation prompt here..."
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handlePromptConfirm}
+              className="bg-blue-500/80 hover:bg-blue-500/90 text-white"
+            >
+              {foldersNeedingPrompts.length > 0
+                ? foldersNeedingPrompts.length === 1
+                  ? 'Confirm & Start Validation'
+                  : 'Next Folder'
+                : 'Confirm'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
         <DialogContent className="sm:max-w-[425px] bg-gray-900/95 border border-white/10 text-white">
