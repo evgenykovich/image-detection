@@ -46,6 +46,17 @@ export interface ValidationResult {
   explanation: string
   features: ImageFeatures
   modelUsed?: string
+  characteristics?: {
+    physical_state?: {
+      matches_expected: boolean
+      has_defects: boolean
+      condition_details: string[]
+    }
+    measurements?: {
+      meets_requirements: boolean
+      measurement_details: string[]
+    }
+  }
 }
 
 export interface ValidationResponse {

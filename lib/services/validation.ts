@@ -4,6 +4,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import { ValidationResult, Category, State } from '@/types/validation'
 import { extractImageFeatures } from './featureExtraction'
 import { findSimilarCases, storeValidationCase } from './vectorStorage'
+import {
+  buildSchemaForCategory,
+  buildPromptFromCategory,
+} from '../schemas/validation'
 
 // Initialize models
 const openaiModel = new ChatOpenAI({
@@ -23,245 +27,69 @@ interface ValidationOptions {
   storeResults?: boolean
   measurement?: string
   prompt?: string
-  useGemini?: boolean // New option to toggle between models
-}
-
-function buildSimplePrompt(
-  category: Category,
-  expectedState: State,
-  measurement?: string,
-  useGemini: boolean = false
-): string {
-  // Base criteria for each category
-  console.log('category', category)
-  console.log('expectedState', expectedState)
-  console.log('measurement', measurement)
-  console.log('useGemini', useGemini)
-  debugger
-  const baseCriteria: { [key: string]: string[] } = {
-    threads: [
-      'Threads should be clearly visible',
-      'Thread pattern should be consistent',
-      'No visible damage to threads',
-    ],
-    corrosion:
-      expectedState.toLowerCase() === 'corroded'
-        ? [
-            'Surface should show signs of rust or discoloration',
-            'Visible surface degradation or pitting',
-            'Material deterioration should be evident',
-          ]
-        : [
-            'Surface should be free of rust',
-            'No visible discoloration',
-            'No surface degradation',
-          ],
-    connector_plates: [
-      'The main body of the plate should maintain a consistent vertical or horizontal orientation',
-      'The mounting surfaces should be level and parallel',
-      'The plate should sit flush with its mounting points',
-      'No twisting or rotation around the mounting axis',
-      'Edges should maintain consistent spacing relative to adjacent components',
-      'Note: Perspective and lighting can create illusions of bending - focus on actual physical alignment',
-    ],
-    cotter_pin: [
-      'Pin should be properly inserted',
-      'Pin ends should be bent correctly',
-      'No missing or loose pins',
-    ],
-    spacer: [
-      'Spacer should be present',
-      'Proper spacing maintained',
-      'No compression or damage',
-    ],
-    connection: [
-      'All components properly connected',
-      'No loose connections',
-      'Proper alignment of parts',
-    ],
-    cable: measurement
-      ? [
-          `Cable diameter should meet ${measurement} inch minimum`,
-          'No visible wear or damage',
-          'Consistent diameter throughout',
-        ]
-      : [
-          'Cable should meet minimum diameter',
-          'No visible wear or damage',
-          'Consistent diameter throughout',
-        ],
-  }
-
-  // Get base criteria for this category
-  const criteria = baseCriteria[category] || []
-
-  // Convert folder names to natural language questions
-  const stateQuestions: { [key: string]: string } = {
-    // Threads
-    'no threads visible': 'Are the threads NOT visible in this image?',
-    'threads visible': 'Are the threads clearly visible in this image?',
-    'threads present': 'Are threads present in this image?',
-    'threads missing': 'Are threads missing from this image?',
-    missing: 'Is the component missing from this image?',
-    visible: 'Is the component clearly visible in this image?',
-
-    // Corrosion
-    clean: 'Is this surface clean without any corrosion?',
-    corroded: 'Is there visible corrosion on this surface?',
-
-    // Cable Diameter - now using dynamic measurement
-    compliant: measurement
-      ? `Does this cable appear to meet the ${measurement} inch minimum diameter requirement?`
-      : 'Does this cable appear to meet the minimum diameter requirement?',
-    non_compliant: measurement
-      ? `Does this cable appear to be below the ${measurement} inch minimum diameter requirement?`
-      : 'Does this cable appear to be below the minimum diameter requirement?',
-
-    // Connector Plates
-    bent: 'Is this connector plate bent?',
-    straight: 'Is this connector plate straight?',
-
-    // Generic states (for Cotter Pins & Spacer Plates)
-    present: 'Is this component present and properly installed in the image?',
-    'not present': 'Is this component missing from the image?',
-    'not visible': 'Is this component not visible in the image?',
-
-    // Positive Connection states
-    secure: 'Is the connection secure and properly fastened?',
-    unsecure: 'Is the connection loose or improperly fastened?',
-    proper: 'Is the connection properly made and secure?',
-    improper: 'Is the connection improper or unsecure?',
-    connected: 'Is everything properly connected and secure?',
-    disconnected: 'Is the connection broken or disconnected?',
-  }
-
-  // Get the appropriate question based on state
-  const question =
-    stateQuestions[expectedState.toLowerCase()] ||
-    `Does this image show ${expectedState} for ${category}?`
-
-  // Adjust prompt based on model
-  if (useGemini) {
-    return `Look at this image and tell me: ${question}
-
-Focus only on what you directly see in the image.
-If you see any bending or deformation, specify if it's physical/structural or just from camera angle/lighting.
-
-Respond in this exact JSON format:
-{
-  "is_valid": boolean,
-  "confidence": number (0-1),
-  "diagnosis": {
-    "overall_assessment": string,
-    "confidence_level": number (0-1),
-    "key_observations": string[],
-    "matched_criteria": [],
-    "failed_criteria": [],
-    "detailed_explanation": string
-  }
-}`
-  }
-
-  // Original OpenAI prompt
-  return `Please analyze this image and answer: ${question}
-
-The image should meet these criteria:
-${criteria.map((c) => `- ${c}`).join('\n')}
-
-Please respond in JSON format with:
-{
-  "is_valid": boolean (true if ALL criteria are met),
-  "confidence": number (0-1 indicating how confident you are),
-  "diagnosis": {
-    "overall_assessment": string (brief assessment of pass/fail),
-    "confidence_level": number (0-1),
-    "key_observations": string[] (specific observations about the image),
-    "matched_criteria": string[] (criteria that were met),
-    "failed_criteria": string[] (criteria that were not met),
-    "detailed_explanation": string (detailed analysis of findings)
-  },
-  "explanation": string (concise summary of why the image passed or failed validation)
-}
-
-Important:
-- matched_criteria should ONLY include criteria that were successfully met
-- failed_criteria should include criteria that were NOT met
-- If ANY criteria fail, is_valid should be false
-- key_observations should contain specific details about what you see, not the criteria themselves
-- diagnosis should provide a detailed technical assessment
-- explanation should provide a brief, clear summary of the validation result
-
-Focus only on answering this specific question about ${category} being ${expectedState}.`
-}
-
-function wrapCustomPrompt(customPrompt: string): string {
-  return `${customPrompt}
-
-Please respond in JSON format with:
-{
-  "is_valid": boolean (true if the image meets the criteria),
-  "confidence": number (0-1 indicating how confident you are),
-  "diagnosis": {
-    "overall_assessment": string (brief assessment of pass/fail),
-    "confidence_level": number (0-1),
-    "key_observations": string[] (specific observations about the image),
-    "matched_criteria": string[] (criteria that were met),
-    "failed_criteria": string[] (criteria that were not met),
-    "detailed_explanation": string (detailed analysis of findings)
-  },
-  "explanation": string (concise summary of why the image passed or failed validation)
-}
-
-Important:
-- matched_criteria should ONLY include criteria that were successfully met
-- failed_criteria should include criteria that were NOT met
-- If ANY criteria fail, is_valid should be false
-- key_observations should contain specific details about what you see
-- diagnosis should provide a detailed technical assessment
-- explanation should provide a brief, clear summary of the validation result`
-}
-
-// Helper function to update validation result
-function handleValidationResult(
-  response: any,
-  matchesExpectedSet: boolean,
-  expectedState: string,
-  criteria: {
-    pass: string[]
-    fail: string[]
-  }
-) {
-  response.is_valid = matchesExpectedSet
-  response.diagnosis.overall_assessment = matchesExpectedSet ? 'Pass' : 'Fail'
-
-  if (matchesExpectedSet) {
-    response.diagnosis.matched_criteria = criteria.pass
-    response.diagnosis.failed_criteria = []
-    response.explanation = `Image correctly matches the ${expectedState} reference set.`
-    response.diagnosis.detailed_explanation =
-      `The image shows the expected characteristics for the ${expectedState} category, ` +
-      `confirming its proper classification in the reference set.`
-  } else {
-    response.diagnosis.matched_criteria = []
-    response.diagnosis.failed_criteria = criteria.fail
-    response.explanation = `Potential misclassification: Image may not belong in the ${expectedState} reference set.`
-    response.diagnosis.detailed_explanation =
-      `The image shows characteristics that differ from what we expect in the ${expectedState} reference set. ` +
-      `This suggests a potential misclassification that needs review.`
-  }
+  useGemini?: boolean
 }
 
 async function getModelResponse(
-  prompt: string,
+  category: string,
+  expectedState: State,
   imageBuffer: Buffer,
-  useGemini: boolean = false
+  useGemini: boolean = false,
+  options?: ValidationOptions
 ) {
   try {
+    // Get the validation schema for this category
+    const schema = buildSchemaForCategory(category)
+
+    // Build the prompt using the category, state, and any custom prompt
+    const basePrompt = buildPromptFromCategory(
+      category,
+      expectedState,
+      options?.prompt
+    )
+
+    const jsonInstructions = `
+You are a computer vision expert analyzing images. Your task is to provide a detailed analysis in JSON format.
+
+Your response must be a valid JSON object with this exact structure:
+{
+  "is_valid": boolean,
+  "confidence": number (between 0 and 1),
+  "diagnosis": {
+    "overall_assessment": string,
+    "confidence_level": number (between 0 and 1),
+    "key_observations": string[],
+    "matched_criteria": string[],
+    "failed_criteria": string[],
+    "detailed_explanation": string
+  },
+  "explanation": string,
+  "characteristics": {
+    "physical_state": {
+      "matches_expected": boolean,
+      "has_defects": boolean,
+      "condition_details": string[]
+    },
+    "measurements": {
+      "meets_requirements": boolean,
+      "measurement_details": string[]
+    }
+  }
+}
+
+IMPORTANT:
+1. Respond ONLY with the JSON object
+2. Do not include any other text or markdown
+3. Ensure all fields are present and properly typed
+4. Base your analysis purely on what you see in the image
+
+Here is your task:
+${basePrompt}`
+
     if (useGemini) {
       const base64Image = imageBuffer.toString('base64')
-
       const result = await geminiModel.generateContent([
-        prompt,
+        jsonInstructions,
         {
           inlineData: {
             data: base64Image,
@@ -271,88 +99,49 @@ async function getModelResponse(
       ])
 
       const response = result.response.text()
-      console.log('Raw Gemini response:', response) // Debug log
+      console.log('Raw Gemini response:', response)
 
       try {
-        // Try to parse JSON response
+        // Parse and validate response against schema
         const parsedResponse = JSON.parse(
           response.replace(/```json\n|\n```/g, '').trim()
         )
-
-        // Ensure the response matches our expected format
-        return {
-          is_valid: parsedResponse.is_valid,
-          confidence: parsedResponse.confidence || 0.8,
-          diagnosis: {
-            overall_assessment: parsedResponse.is_valid ? 'Pass' : 'Fail',
-            confidence_level: parsedResponse.confidence || 0.8,
-            key_observations: parsedResponse.key_observations || [
-              parsedResponse.explanation || response,
-            ],
-            matched_criteria: parsedResponse.matched_criteria || [],
-            failed_criteria: parsedResponse.failed_criteria || [],
-            detailed_explanation: parsedResponse.explanation || response,
-          },
-          explanation: parsedResponse.explanation || response,
-          modelUsed: 'Gemini',
-        }
+        return schema.parse(parsedResponse)
       } catch (error) {
-        console.warn('Failed to parse Gemini JSON response:', error)
-        // Create a structured response from the text
-        const isValid =
-          response.toLowerCase().includes('yes') ||
-          response.toLowerCase().includes('valid') ||
-          response.toLowerCase().includes('pass')
-
-        return {
-          is_valid: isValid,
-          confidence: 0.8,
-          diagnosis: {
-            overall_assessment: isValid ? 'Pass' : 'Fail',
-            confidence_level: 0.8,
-            key_observations: [response],
-            matched_criteria: [],
-            failed_criteria: [],
-            detailed_explanation: response,
-          },
-          explanation: response,
-          modelUsed: 'Gemini',
-        }
+        console.error('Failed to parse Gemini response:', error)
+        throw new Error('Invalid JSON response from Gemini')
       }
     }
 
-    // Existing OpenAI logic
-    const message = new HumanMessage(prompt)
+    // OpenAI path
+    const message = new HumanMessage(jsonInstructions)
     message.additional_kwargs = {
       image: imageBuffer.toString('base64'),
     }
 
     const response = await openaiModel.call([message])
+    console.log('Raw OpenAI response:', response.content)
 
     try {
-      const parsedResponse = JSON.parse(
-        response.content.replace(/```json\n|\n```/g, '').trim()
-      )
-      parsedResponse.modelUsed = 'OpenAI'
-      return parsedResponse
-    } catch (error) {
-      console.warn('Failed to parse OpenAI JSON response:', error)
-      return {
-        is_valid: response.content.toLowerCase().includes('yes'),
-        confidence: 0.5,
-        diagnosis: {
-          overall_assessment: response.content.includes('valid')
-            ? 'Valid'
-            : 'Invalid',
-          confidence_level: 0.5,
-          key_observations: [response.content],
-          matched_criteria: [],
-          failed_criteria: [],
-          detailed_explanation: response.content,
-        },
-        explanation: response.content,
-        modelUsed: 'OpenAI',
+      let content = response.content
+      // If the response starts with "I apologize" or similar, try to find JSON in the response
+      if (
+        content.toLowerCase().includes('i apologize') ||
+        content.toLowerCase().includes("i'm sorry")
+      ) {
+        const jsonMatch = content.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          content = jsonMatch[0]
+        }
       }
+
+      const parsedResponse = JSON.parse(
+        content.replace(/```json\n|\n```/g, '').trim()
+      )
+      return schema.parse(parsedResponse)
+    } catch (error) {
+      console.error('Failed to parse OpenAI response:', error)
+      throw new Error('Invalid JSON response from OpenAI')
     }
   } catch (error) {
     console.error(
@@ -365,7 +154,7 @@ async function getModelResponse(
 
 export async function validateImage(
   imageBuffer: Buffer,
-  category: Category,
+  category: string,
   expectedState: State,
   options: ValidationOptions = {
     useVectorStore: true,
@@ -375,13 +164,14 @@ export async function validateImage(
   }
 ): Promise<ValidationResult> {
   try {
-    console.log('Using Gemini:', options.useGemini) // Debug log
+    console.log('Using Gemini:', options.useGemini)
+    console.log('Custom prompt:', options.prompt)
     const features = await extractImageFeatures(imageBuffer)
 
     if (options.isGroundTruth) {
       const groundTruthResult: ValidationResult = {
-        isValid: true, // Always valid for ground truth
-        confidence: 1.0, // Maximum confidence
+        isValid: true,
+        confidence: 1.0,
         diagnosis: {
           overall_assessment: 'Valid',
           confidence_level: 1.0,
@@ -398,429 +188,80 @@ export async function validateImage(
         explanation: `Ground truth example of ${expectedState} ${category}`,
         features,
         modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
+        characteristics: {
+          physical_state: {
+            matches_expected: true,
+            has_defects: false,
+            condition_details: [`Valid ${expectedState} state`],
+          },
+        },
       }
 
-      // Store the ground truth case
-      try {
-        await storeValidationCase(
-          `data:image/jpeg;base64,${imageBuffer.toString('base64')}`,
-          category,
-          expectedState,
-          features,
-          groundTruthResult.diagnosis.detailed_explanation,
-          groundTruthResult.matchedCriteria,
-          1.0, // Ground truth confidence
-          options.prompt // Pass the prompt if provided
-        )
-      } catch (error) {
-        console.warn('Failed to store ground truth case:', error)
+      if (options.storeResults) {
+        try {
+          await storeValidationCase(
+            `data:image/jpeg;base64,${imageBuffer.toString('base64')}`,
+            category,
+            expectedState,
+            features,
+            groundTruthResult.diagnosis.detailed_explanation,
+            groundTruthResult.matchedCriteria,
+            1.0,
+            options.prompt
+          )
+        } catch (error) {
+          console.warn('Failed to store ground truth case:', error)
+        }
       }
 
       return groundTruthResult
     }
 
-    // Build the prompt based on options
-    debugger
-    const basePrompt = options.prompt
-      ? wrapCustomPrompt(options.prompt)
-      : buildSimplePrompt(
-          category,
-          expectedState,
-          options.measurement,
-          options.useGemini
-        )
-
-    // Get response from the selected model
-    const parsedResponse = await getModelResponse(
-      basePrompt,
+    // Get model response using schema-based validation
+    const modelResponse = await getModelResponse(
+      category,
+      expectedState,
       imageBuffer,
-      options.useGemini
+      options.useGemini,
+      options
     )
-
-    // Add modelUsed to the response
-    parsedResponse.modelUsed = options.useGemini ? 'Gemini' : 'OpenAI'
-
-    // For Gemini, skip the category-specific validation logic
-    if (options.useGemini) {
-      return {
-        isValid: parsedResponse.is_valid,
-        confidence: parsedResponse.confidence,
-        diagnosis: parsedResponse.diagnosis,
-        matchedCriteria: parsedResponse.matched_criteria || [],
-        failedCriteria: parsedResponse.failed_criteria || [],
-        similarCases: [],
-        explanation:
-          parsedResponse.explanation ||
-          parsedResponse.diagnosis?.detailed_explanation,
-        features,
-        modelUsed: 'Gemini',
-      }
-    }
-
-    // Rest of OpenAI validation logic
-    switch (category.toLowerCase()) {
-      case 'connector_plates': {
-        // First check for clear indicators of physical bending
-        const hasPhysicalBending =
-          parsedResponse.diagnosis?.key_observations?.some((obs: string) => {
-            const lowerObs = obs.toLowerCase()
-            return (
-              lowerObs.includes('physical deformation') ||
-              lowerObs.includes('structural misalignment') ||
-              lowerObs.includes('actual bending') ||
-              (lowerObs.includes('gap') && lowerObs.includes('structural')) ||
-              (lowerObs.includes('bend') && lowerObs.includes('noticeable')) ||
-              (lowerObs.includes('warp') && !lowerObs.includes('camera')) ||
-              (lowerObs.includes('misaligned') &&
-                lowerObs.includes('intended')) ||
-              (lowerObs.includes('gap') && lowerObs.includes('between'))
-            )
-          })
-
-        // Check for observations that might be perspective/lighting effects
-        const hasPerspectiveEffects =
-          parsedResponse.diagnosis?.key_observations?.some((obs: string) => {
-            const lowerObs = obs.toLowerCase()
-            return (
-              lowerObs.includes('perspective') ||
-              lowerObs.includes('camera angle') ||
-              lowerObs.includes('lighting effect') ||
-              lowerObs.includes('shadow') ||
-              lowerObs.includes('viewing angle') ||
-              // Add specific perspective-related terms
-              (lowerObs.includes('appear') && lowerObs.includes('angle')) ||
-              lowerObs.includes('optical') ||
-              lowerObs.includes('illusion')
-            )
-          })
-
-        // Only consider it bent if we have clear physical evidence and not just perspective effects
-        const isBent = hasPhysicalBending && !hasPerspectiveEffects
-
-        const shouldBeBent = expectedState.toLowerCase() === 'bent'
-        const matchesExpectedSet =
-          (shouldBeBent && hasPhysicalBending) ||
-          (!shouldBeBent && !hasPhysicalBending)
-
-        // Update the response based on what we actually found
-        if (hasPhysicalBending) {
-          // If we found physical bending evidence, make sure our observations reflect this
-          parsedResponse.is_valid = shouldBeBent
-          parsedResponse.diagnosis.overall_assessment = shouldBeBent
-            ? 'Pass'
-            : 'Fail'
-          parsedResponse.diagnosis.matched_criteria = shouldBeBent
-            ? [
-                'Physical deformation confirmed',
-                'Structural bending verified',
-                'Matches bent reference set',
-              ]
-            : []
-          parsedResponse.diagnosis.failed_criteria = shouldBeBent
-            ? []
-            : [
-                'Physical deformation detected in straight reference set',
-                'Structural bending observed',
-                'Possible misclassification',
-              ]
-        }
-
-        // Create context-specific explanations
-        let detailedExplanation = ''
-        let briefExplanation = ''
-
-        if (shouldBeBent) {
-          if (hasPhysicalBending) {
-            detailedExplanation = `The image shows clear evidence of physical bending and structural deformation through multiple indicators: ${parsedResponse.diagnosis.key_observations.join(
-              ', '
-            )}. This correctly matches its classification in the "bent" reference set.`
-            briefExplanation = `Image correctly classified as bent, showing clear physical deformation.`
-          } else if (hasPerspectiveEffects) {
-            detailedExplanation = `While some visual effects might suggest bending, no clear physical deformation is evident. The observed effects may be due to camera angles or lighting. Additional images from different angles might help confirm the structural state.`
-            briefExplanation = `No clear physical bending detected. Consider additional viewing angles.`
-          } else {
-            detailedExplanation = `The image does not show sufficient evidence of physical bending or structural deformation, despite being in the "bent" reference set. This suggests a potential misclassification that needs review.`
-            briefExplanation = `No physical bending detected in bent reference set. Possible misclassification.`
-          }
-        } else {
-          if (hasPhysicalBending) {
-            detailedExplanation = `The image shows clear signs of physical bending and structural deformation: ${parsedResponse.diagnosis.key_observations.join(
-              ', '
-            )}. This suggests a potential misclassification as this is in the "straight" reference set.`
-            briefExplanation = `Physical bending detected in straight reference set. Possible misclassification.`
-          } else if (hasPerspectiveEffects) {
-            detailedExplanation = `While some visual effects might suggest bending, these appear to be due to perspective or lighting rather than actual structural deformation. The plate appears to be correctly classified as straight.`
-            briefExplanation = `Apparent bending due to perspective effects; structurally straight as expected.`
-          } else {
-            detailedExplanation = `The image shows a properly aligned plate without any physical deformation, correctly matching its classification in the "straight" reference set.`
-            briefExplanation = `Image correctly classified as straight, showing no physical deformation.`
-          }
-        }
-
-        // Update the response with our context-specific explanations
-        parsedResponse.explanation = briefExplanation
-        parsedResponse.diagnosis.detailed_explanation = detailedExplanation
-
-        // Don't call handleValidationResult - we've already set everything we need
-        break
-      }
-
-      case 'corrosion': {
-        // Existing corrosion logic
-        const foundCorrosion = parsedResponse.diagnosis?.key_observations?.some(
-          (obs: string) =>
-            obs.toLowerCase().includes('corrosion') ||
-            obs.toLowerCase().includes('rust') ||
-            obs.toLowerCase().includes('deterioration')
-        )
-
-        const isNoCorrosionSet =
-          expectedState.toLowerCase().includes('no') ||
-          expectedState.toLowerCase() === 'clean'
-        const isCorrosionSet = !isNoCorrosionSet
-        const matchesExpectedSet =
-          (isNoCorrosionSet && !foundCorrosion) ||
-          (isCorrosionSet && foundCorrosion)
-
-        handleValidationResult(
-          parsedResponse,
-          matchesExpectedSet,
-          expectedState,
-          isNoCorrosionSet
-            ? {
-                pass: [
-                  'Surface is free from corrosion',
-                  'No visible deterioration',
-                  'Material integrity maintained',
-                ],
-                fail: [
-                  'Corrosion detected in no-corrosion reference set',
-                  'Surface shows unexpected deterioration',
-                  'Possible misclassification',
-                ],
-              }
-            : {
-                pass: [
-                  'Corrosion clearly visible',
-                  'Expected deterioration present',
-                  'Matches corrosion reference set',
-                ],
-                fail: [
-                  'No corrosion detected in corrosion reference set',
-                  'Surface appears unexpectedly clean',
-                  'Possible misclassification',
-                ],
-              }
-        )
-        break
-      }
-
-      case 'threads': {
-        const foundThreads = parsedResponse.diagnosis?.key_observations?.some(
-          (obs: string) =>
-            obs.toLowerCase().includes('thread') &&
-            !obs.toLowerCase().includes('no thread')
-        )
-
-        const shouldHaveThreads =
-          !expectedState.toLowerCase().includes('no') &&
-          (expectedState.toLowerCase().includes('visible') ||
-            expectedState.toLowerCase().includes('present'))
-        const matchesExpectedSet =
-          (shouldHaveThreads && foundThreads) ||
-          (!shouldHaveThreads && !foundThreads)
-
-        handleValidationResult(
-          parsedResponse,
-          matchesExpectedSet,
-          expectedState,
-          shouldHaveThreads
-            ? {
-                pass: [
-                  'Threads clearly visible',
-                  'Thread pattern identifiable',
-                  'Expected thread features present',
-                ],
-                fail: [
-                  'No threads visible in threaded reference set',
-                  'Expected threads not found',
-                  'Possible misclassification',
-                ],
-              }
-            : {
-                pass: [
-                  'No threads visible',
-                  'Smooth surface as expected',
-                  'Matches thread-free reference',
-                ],
-                fail: [
-                  'Unexpected threads found',
-                  'Surface shows thread pattern',
-                  'Possible misclassification',
-                ],
-              }
-        )
-        break
-      }
-
-      case 'cotter_pin': {
-        const pinPresent = parsedResponse.diagnosis?.key_observations?.some(
-          (obs: string) =>
-            obs.toLowerCase().includes('pin') &&
-            !obs.toLowerCase().includes('missing') &&
-            !obs.toLowerCase().includes('absent')
-        )
-
-        const shouldBePresent = expectedState.toLowerCase() === 'present'
-        const matchesExpectedSet =
-          (shouldBePresent && pinPresent) || (!shouldBePresent && !pinPresent)
-
-        handleValidationResult(
-          parsedResponse,
-          matchesExpectedSet,
-          expectedState,
-          shouldBePresent
-            ? {
-                pass: [
-                  'Cotter pin properly installed',
-                  'Pin ends correctly bent',
-                  'Matches present reference set',
-                ],
-                fail: [
-                  'Cotter pin missing from assembly',
-                  'Expected pin not found',
-                  'Possible misclassification',
-                ],
-              }
-            : {
-                pass: [
-                  'No cotter pin present as expected',
-                  'Assembly matches missing pin reference',
-                  'Correct absence verified',
-                ],
-                fail: [
-                  'Unexpected cotter pin found',
-                  'Pin present when should be missing',
-                  'Possible misclassification',
-                ],
-              }
-        )
-        break
-      }
-
-      case 'cable': {
-        const meetsMinimum = parsedResponse.diagnosis?.key_observations?.some(
-          (obs: string) =>
-            obs.toLowerCase().includes('meets') ||
-            obs.toLowerCase().includes('exceeds') ||
-            obs.toLowerCase().includes('compliant')
-        )
-
-        const shouldMeetMinimum = expectedState.toLowerCase() === 'compliant'
-        const matchesExpectedSet =
-          (shouldMeetMinimum && meetsMinimum) ||
-          (!shouldMeetMinimum && !meetsMinimum)
-
-        handleValidationResult(
-          parsedResponse,
-          matchesExpectedSet,
-          expectedState,
-          shouldMeetMinimum
-            ? {
-                pass: [
-                  'Cable meets minimum diameter',
-                  'Dimensions within specification',
-                  'Matches compliant reference set',
-                ],
-                fail: [
-                  'Cable diameter below minimum',
-                  'Does not meet size requirement',
-                  'Possible misclassification',
-                ],
-              }
-            : {
-                pass: [
-                  'Cable confirmed below minimum',
-                  'Undersized as expected',
-                  'Matches non-compliant reference',
-                ],
-                fail: [
-                  'Cable unexpectedly meets minimum',
-                  'Size exceeds expected non-compliant state',
-                  'Possible misclassification',
-                ],
-              }
-        )
-        break
-      }
-
-      case 'connection': {
-        const isSecure = parsedResponse.diagnosis?.key_observations?.some(
-          (obs: string) =>
-            obs.toLowerCase().includes('secure') ||
-            obs.toLowerCase().includes('proper') ||
-            obs.toLowerCase().includes('tight')
-        )
-
-        const shouldBeSecure = ['secure', 'proper', 'connected'].includes(
-          expectedState.toLowerCase()
-        )
-        const matchesExpectedSet =
-          (shouldBeSecure && isSecure) || (!shouldBeSecure && !isSecure)
-
-        handleValidationResult(
-          parsedResponse,
-          matchesExpectedSet,
-          expectedState,
-          shouldBeSecure
-            ? {
-                pass: [
-                  'Connection properly secured',
-                  'Components correctly fastened',
-                  'Matches secure reference set',
-                ],
-                fail: [
-                  'Connection appears loose',
-                  'Expected security not found',
-                  'Possible misclassification',
-                ],
-              }
-            : {
-                pass: [
-                  'Connection appropriately unsecured',
-                  'Expected loose state verified',
-                  'Matches unsecure reference',
-                ],
-                fail: [
-                  'Unexpected secure connection',
-                  'Components improperly fastened',
-                  'Possible misclassification',
-                ],
-              }
-        )
-        break
-      }
-    }
 
     // Build the validation result
     const result: ValidationResult = {
-      isValid: parsedResponse.is_valid,
-      confidence: parsedResponse.confidence,
-      diagnosis: parsedResponse.diagnosis,
-      matchedCriteria:
-        parsedResponse.matched_criteria ||
-        parsedResponse.diagnosis?.matched_criteria ||
-        [],
-      failedCriteria:
-        parsedResponse.failed_criteria ||
-        parsedResponse.diagnosis?.failed_criteria ||
-        [],
+      isValid: options?.prompt
+        ? modelResponse.is_valid // For custom prompts, use the direct response
+        : modelResponse.characteristics?.physical_state?.matches_expected ===
+          false
+        ? modelResponse.is_valid // For straight validation, true means it's straight
+        : !modelResponse.is_valid, // Invert the validation for bent validation
+      confidence: modelResponse.confidence,
+      diagnosis: {
+        ...modelResponse.diagnosis,
+        overall_assessment: options?.prompt
+          ? modelResponse.is_valid
+            ? 'Valid'
+            : 'Invalid'
+          : modelResponse.characteristics?.physical_state?.matches_expected ===
+            false
+          ? 'Valid' // If it's straight when we expect bent, it's valid for straight check
+          : 'Invalid', // If it's bent when we expect straight, it's invalid for straight check
+        key_observations: [
+          ...modelResponse.diagnosis.key_observations,
+          modelResponse.characteristics?.physical_state?.condition_details ||
+            [],
+        ].flat(),
+      },
+      matchedCriteria: modelResponse.diagnosis.matched_criteria,
+      failedCriteria: modelResponse.diagnosis.failed_criteria,
       similarCases: [],
       explanation:
-        parsedResponse.explanation ||
-        parsedResponse.diagnosis?.detailed_explanation,
+        modelResponse.characteristics?.physical_state?.condition_details?.[0] ||
+        (modelResponse.is_valid
+          ? 'Connector plate is straight'
+          : 'Connector plate is bent'),
       features,
-      modelUsed: parsedResponse.modelUsed,
+      modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
+      characteristics: modelResponse.characteristics,
     }
 
     // If vector store is enabled, find and use similar cases
@@ -829,12 +270,12 @@ export async function validateImage(
         const similarCases = await findSimilarCases(features, category)
         result.similarCases = similarCases
 
-        // If we have high confidence similar cases, use them to influence the result
+        // Adjust confidence based on similar cases if we have high confidence matches
         const highConfidenceCases = similarCases.filter(
           (c) => c.confidence > 0.8
         )
+
         if (highConfidenceCases.length > 0) {
-          // Calculate weighted average confidence based on similarity scores
           const totalWeight = highConfidenceCases.reduce(
             (sum, c) => sum + c.confidence,
             0
@@ -845,95 +286,15 @@ export async function validateImage(
               0
             ) / totalWeight
 
-          // Adjust our confidence based on similar cases
           result.confidence = (result.confidence + weightedConfidence) / 2
 
-          // If we have very similar high confidence cases, they should influence the validation
-          const verySimilarCases = highConfidenceCases.filter(
-            (c) => c.confidence > 0.95
+          // Add reference match information to observations
+          const mostSimilar = highConfidenceCases[0]
+          result.diagnosis.key_observations.push(
+            `Matches reference image with ${(
+              mostSimilar.confidence * 100
+            ).toFixed(1)}% confidence`
           )
-          if (verySimilarCases.length > 0) {
-            // Update the result based on the most similar case
-            const mostSimilar = verySimilarCases[0]
-
-            // If we have an extremely high confidence match with a reference image,
-            // trust the reference image's validation state
-            if (mostSimilar.confidence > 0.99) {
-              // Extract validation state from the reference image ID
-              const isReferenceValid =
-                mostSimilar.diagnosis?.toLowerCase().includes('valid') ||
-                mostSimilar.imageUrl.toLowerCase().includes('compliant')
-
-              if (isReferenceValid) {
-                result.isValid = true
-                result.diagnosis.overall_assessment = 'Valid'
-                result.diagnosis.confidence_level = mostSimilar.confidence
-
-                const contextByCategory: { [key: string]: string } = {
-                  connector_plates:
-                    'Connector plate alignment and mounting match reference standard',
-                  cable_diameter: 'Cable diameter matches reference standard',
-                  threads:
-                    'Thread pattern and condition match reference standard',
-                  corrosion: 'Surface condition matches reference standard',
-                  cotter_pin: 'Pin installation matches reference standard',
-                  spacer: 'Spacer installation matches reference standard',
-                  connection: 'Connection assembly matches reference standard',
-                }
-
-                const matchContext =
-                  contextByCategory[category] ||
-                  `Matches ${category} reference standard`
-
-                result.diagnosis.key_observations = [
-                  `Matches valid reference image with ${(
-                    mostSimilar.confidence * 100
-                  ).toFixed(1)}% confidence`,
-                  matchContext,
-                  ...result.diagnosis.key_observations.filter(
-                    (obs) =>
-                      !obs.toLowerCase().includes('matches reference image')
-                  ),
-                ]
-
-                // Provide more detailed explanation based on category
-                const categorySpecificDetails =
-                  category === 'connector_plates'
-                    ? `The connector plate's mounting, alignment, and overall orientation match a verified reference example. ` +
-                      `While visual inspection may suggest variations due to lighting and perspective, the structural alignment ` +
-                      `matches our reference standard for proper installation.`
-                    : ''
-
-                result.diagnosis.detailed_explanation =
-                  `This image matches a known valid reference image with very high confidence (${(
-                    mostSimilar.confidence * 100
-                  ).toFixed(1)}%). ` +
-                  categorySpecificDetails +
-                  '\n\n' +
-                  `Original AI Assessment: ${result.diagnosis.detailed_explanation}`
-              } else {
-                // Keep the invalid state but note the reference match
-                result.diagnosis.key_observations.push(
-                  `Matches reference image with ${(
-                    mostSimilar.confidence * 100
-                  ).toFixed(1)}% confidence`
-                )
-                result.matchedCriteria.push(
-                  `Validated against reference image for ${category}`
-                )
-              }
-            } else {
-              // For lower confidence matches, just add the observation
-              result.diagnosis.key_observations.push(
-                `Matches reference image with ${(
-                  mostSimilar.confidence * 100
-                ).toFixed(1)}% confidence`
-              )
-              result.matchedCriteria.push(
-                `Validated against reference image for ${category}`
-              )
-            }
-          }
         }
       } catch (error) {
         console.warn('Failed to find or process similar cases:', error)
@@ -958,9 +319,16 @@ export async function validateImage(
       matchedCriteria: [],
       failedCriteria: ['Validation error occurred'],
       similarCases: [],
-      explanation: error instanceof Error ? error.message : 'Unknown error',
+      explanation: 'Validation failed',
       features: await extractImageFeatures(imageBuffer),
       modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
+      characteristics: {
+        physical_state: {
+          matches_expected: false,
+          has_defects: true,
+          condition_details: ['Validation error occurred'],
+        },
+      },
     }
   }
 }
