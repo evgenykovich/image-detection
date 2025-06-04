@@ -45,6 +45,7 @@ export interface ValidationResult {
   similarCases: SimilarCase[]
   explanation: string
   features: ImageFeatures
+  modelUsed?: string
 }
 
 export interface ValidationResponse {

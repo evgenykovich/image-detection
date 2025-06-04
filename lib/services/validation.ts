@@ -1,12 +1,20 @@
 import { ChatOpenAI } from 'langchain/chat_models/openai'
 import { HumanMessage } from 'langchain/schema'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import { ValidationResult, Category, State } from '@/types/validation'
 import { extractImageFeatures } from './featureExtraction'
 import { findSimilarCases, storeValidationCase } from './vectorStorage'
 
-const model = new ChatOpenAI({
+// Initialize models
+const openaiModel = new ChatOpenAI({
   modelName: 'gpt-4o-mini',
   temperature: 0,
+})
+
+const geminiModel = new GoogleGenerativeAI(
+  process.env.GOOGLE_AI_API_KEY || ''
+).getGenerativeModel({
+  model: 'gemini-1.5-flash-latest',
 })
 
 interface ValidationOptions {
@@ -15,14 +23,21 @@ interface ValidationOptions {
   storeResults?: boolean
   measurement?: string
   prompt?: string
+  useGemini?: boolean // New option to toggle between models
 }
 
 function buildSimplePrompt(
   category: Category,
   expectedState: State,
-  measurement?: string
+  measurement?: string,
+  useGemini: boolean = false
 ): string {
   // Base criteria for each category
+  console.log('category', category)
+  console.log('expectedState', expectedState)
+  console.log('measurement', measurement)
+  console.log('useGemini', useGemini)
+  debugger
   const baseCriteria: { [key: string]: string[] } = {
     threads: [
       'Threads should be clearly visible',
@@ -125,6 +140,29 @@ function buildSimplePrompt(
     stateQuestions[expectedState.toLowerCase()] ||
     `Does this image show ${expectedState} for ${category}?`
 
+  // Adjust prompt based on model
+  if (useGemini) {
+    return `Look at this image and tell me: ${question}
+
+Focus only on what you directly see in the image.
+If you see any bending or deformation, specify if it's physical/structural or just from camera angle/lighting.
+
+Respond in this exact JSON format:
+{
+  "is_valid": boolean,
+  "confidence": number (0-1),
+  "diagnosis": {
+    "overall_assessment": string,
+    "confidence_level": number (0-1),
+    "key_observations": string[],
+    "matched_criteria": [],
+    "failed_criteria": [],
+    "detailed_explanation": string
+  }
+}`
+  }
+
+  // Original OpenAI prompt
   return `Please analyze this image and answer: ${question}
 
 The image should meet these criteria:
@@ -213,6 +251,118 @@ function handleValidationResult(
   }
 }
 
+async function getModelResponse(
+  prompt: string,
+  imageBuffer: Buffer,
+  useGemini: boolean = false
+) {
+  try {
+    if (useGemini) {
+      const base64Image = imageBuffer.toString('base64')
+
+      const result = await geminiModel.generateContent([
+        prompt,
+        {
+          inlineData: {
+            data: base64Image,
+            mimeType: 'image/jpeg',
+          },
+        },
+      ])
+
+      const response = result.response.text()
+      console.log('Raw Gemini response:', response) // Debug log
+
+      try {
+        // Try to parse JSON response
+        const parsedResponse = JSON.parse(
+          response.replace(/```json\n|\n```/g, '').trim()
+        )
+
+        // Ensure the response matches our expected format
+        return {
+          is_valid: parsedResponse.is_valid,
+          confidence: parsedResponse.confidence || 0.8,
+          diagnosis: {
+            overall_assessment: parsedResponse.is_valid ? 'Pass' : 'Fail',
+            confidence_level: parsedResponse.confidence || 0.8,
+            key_observations: parsedResponse.key_observations || [
+              parsedResponse.explanation || response,
+            ],
+            matched_criteria: parsedResponse.matched_criteria || [],
+            failed_criteria: parsedResponse.failed_criteria || [],
+            detailed_explanation: parsedResponse.explanation || response,
+          },
+          explanation: parsedResponse.explanation || response,
+          modelUsed: 'Gemini',
+        }
+      } catch (error) {
+        console.warn('Failed to parse Gemini JSON response:', error)
+        // Create a structured response from the text
+        const isValid =
+          response.toLowerCase().includes('yes') ||
+          response.toLowerCase().includes('valid') ||
+          response.toLowerCase().includes('pass')
+
+        return {
+          is_valid: isValid,
+          confidence: 0.8,
+          diagnosis: {
+            overall_assessment: isValid ? 'Pass' : 'Fail',
+            confidence_level: 0.8,
+            key_observations: [response],
+            matched_criteria: [],
+            failed_criteria: [],
+            detailed_explanation: response,
+          },
+          explanation: response,
+          modelUsed: 'Gemini',
+        }
+      }
+    }
+
+    // Existing OpenAI logic
+    const message = new HumanMessage(prompt)
+    message.additional_kwargs = {
+      image: imageBuffer.toString('base64'),
+    }
+
+    const response = await openaiModel.call([message])
+
+    try {
+      const parsedResponse = JSON.parse(
+        response.content.replace(/```json\n|\n```/g, '').trim()
+      )
+      parsedResponse.modelUsed = 'OpenAI'
+      return parsedResponse
+    } catch (error) {
+      console.warn('Failed to parse OpenAI JSON response:', error)
+      return {
+        is_valid: response.content.toLowerCase().includes('yes'),
+        confidence: 0.5,
+        diagnosis: {
+          overall_assessment: response.content.includes('valid')
+            ? 'Valid'
+            : 'Invalid',
+          confidence_level: 0.5,
+          key_observations: [response.content],
+          matched_criteria: [],
+          failed_criteria: [],
+          detailed_explanation: response.content,
+        },
+        explanation: response.content,
+        modelUsed: 'OpenAI',
+      }
+    }
+  } catch (error) {
+    console.error(
+      `Error in ${useGemini ? 'Gemini' : 'OpenAI'} model response:`,
+      error
+    )
+    throw error
+  }
+}
+
 export async function validateImage(
   imageBuffer: Buffer,
   category: Category,
@@ -221,14 +371,13 @@ export async function validateImage(
     useVectorStore: true,
     isGroundTruth: false,
     storeResults: true,
+    useGemini: false,
   }
 ): Promise<ValidationResult> {
-  debugger
   try {
-    // Extract basic features for future reference
+    console.log('Using Gemini:', options.useGemini) // Debug log
     const features = await extractImageFeatures(imageBuffer)
 
-    // If this is a ground truth image (training mode), skip AI validation
     if (options.isGroundTruth) {
       const groundTruthResult: ValidationResult = {
         isValid: true, // Always valid for ground truth
@@ -248,6 +397,7 @@ export async function validateImage(
         similarCases: [],
         explanation: `Ground truth example of ${expectedState} ${category}`,
         features,
+        modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
       }
 
       // Store the ground truth case
@@ -269,40 +419,152 @@ export async function validateImage(
       return groundTruthResult
     }
 
-    // Regular validation flow for non-training mode
+    // Build the prompt based on options
+    debugger
     const basePrompt = options.prompt
       ? wrapCustomPrompt(options.prompt)
-      : buildSimplePrompt(category, expectedState, options.measurement)
+      : buildSimplePrompt(
+          category,
+          expectedState,
+          options.measurement,
+          options.useGemini
+        )
 
-    // Get vision model analysis
-    const message = new HumanMessage(basePrompt)
-    message.additional_kwargs = {
-      image: imageBuffer.toString('base64'),
-    }
+    // Get response from the selected model
+    const parsedResponse = await getModelResponse(
+      basePrompt,
+      imageBuffer,
+      options.useGemini
+    )
 
-    const response = await model.call([message])
+    // Add modelUsed to the response
+    parsedResponse.modelUsed = options.useGemini ? 'Gemini' : 'OpenAI'
 
-    // Parse the response
-    let parsedResponse
-    try {
-      // Clean any markdown code block markers and trim whitespace
-      const cleanedContent = response.content
-        .replace(/```json\n|\n```/g, '')
-        .trim()
-      parsedResponse = JSON.parse(cleanedContent)
-    } catch (error) {
-      console.warn('Failed to parse JSON response:', error)
-      // Fallback parsing for non-JSON responses
-      parsedResponse = {
-        is_valid: response.content.toLowerCase().includes('yes'),
-        confidence: 0.5,
-        explanation: response.content,
-        key_observations: [response.content],
+    // For Gemini, skip the category-specific validation logic
+    if (options.useGemini) {
+      return {
+        isValid: parsedResponse.is_valid,
+        confidence: parsedResponse.confidence,
+        diagnosis: parsedResponse.diagnosis,
+        matchedCriteria: parsedResponse.matched_criteria || [],
+        failedCriteria: parsedResponse.failed_criteria || [],
+        similarCases: [],
+        explanation:
+          parsedResponse.explanation ||
+          parsedResponse.diagnosis?.detailed_explanation,
+        features,
+        modelUsed: 'Gemini',
       }
     }
 
-    // Special handling for each category
+    // Rest of OpenAI validation logic
     switch (category.toLowerCase()) {
+      case 'connector_plates': {
+        // First check for clear indicators of physical bending
+        const hasPhysicalBending =
+          parsedResponse.diagnosis?.key_observations?.some((obs: string) => {
+            const lowerObs = obs.toLowerCase()
+            return (
+              lowerObs.includes('physical deformation') ||
+              lowerObs.includes('structural misalignment') ||
+              lowerObs.includes('actual bending') ||
+              (lowerObs.includes('gap') && lowerObs.includes('structural')) ||
+              (lowerObs.includes('bend') && lowerObs.includes('noticeable')) ||
+              (lowerObs.includes('warp') && !lowerObs.includes('camera')) ||
+              (lowerObs.includes('misaligned') &&
+                lowerObs.includes('intended')) ||
+              (lowerObs.includes('gap') && lowerObs.includes('between'))
+            )
+          })
+
+        // Check for observations that might be perspective/lighting effects
+        const hasPerspectiveEffects =
+          parsedResponse.diagnosis?.key_observations?.some((obs: string) => {
+            const lowerObs = obs.toLowerCase()
+            return (
+              lowerObs.includes('perspective') ||
+              lowerObs.includes('camera angle') ||
+              lowerObs.includes('lighting effect') ||
+              lowerObs.includes('shadow') ||
+              lowerObs.includes('viewing angle') ||
+              // Add specific perspective-related terms
+              (lowerObs.includes('appear') && lowerObs.includes('angle')) ||
+              lowerObs.includes('optical') ||
+              lowerObs.includes('illusion')
+            )
+          })
+
+        // Only consider it bent if we have clear physical evidence and not just perspective effects
+        const isBent = hasPhysicalBending && !hasPerspectiveEffects
+
+        const shouldBeBent = expectedState.toLowerCase() === 'bent'
+        const matchesExpectedSet =
+          (shouldBeBent && hasPhysicalBending) ||
+          (!shouldBeBent && !hasPhysicalBending)
+
+        // Update the response based on what we actually found
+        if (hasPhysicalBending) {
+          // If we found physical bending evidence, make sure our observations reflect this
+          parsedResponse.is_valid = shouldBeBent
+          parsedResponse.diagnosis.overall_assessment = shouldBeBent
+            ? 'Pass'
+            : 'Fail'
+          parsedResponse.diagnosis.matched_criteria = shouldBeBent
+            ? [
+                'Physical deformation confirmed',
+                'Structural bending verified',
+                'Matches bent reference set',
+              ]
+            : []
+          parsedResponse.diagnosis.failed_criteria = shouldBeBent
+            ? []
+            : [
+                'Physical deformation detected in straight reference set',
+                'Structural bending observed',
+                'Possible misclassification',
+              ]
+        }
+
+        // Create context-specific explanations
+        let detailedExplanation = ''
+        let briefExplanation = ''
+
+        if (shouldBeBent) {
+          if (hasPhysicalBending) {
+            detailedExplanation = `The image shows clear evidence of physical bending and structural deformation through multiple indicators: ${parsedResponse.diagnosis.key_observations.join(
+              ', '
+            )}. This correctly matches its classification in the "bent" reference set.`
+            briefExplanation = `Image correctly classified as bent, showing clear physical deformation.`
+          } else if (hasPerspectiveEffects) {
+            detailedExplanation = `While some visual effects might suggest bending, no clear physical deformation is evident. The observed effects may be due to camera angles or lighting. Additional images from different angles might help confirm the structural state.`
+            briefExplanation = `No clear physical bending detected. Consider additional viewing angles.`
+          } else {
+            detailedExplanation = `The image does not show sufficient evidence of physical bending or structural deformation, despite being in the "bent" reference set. This suggests a potential misclassification that needs review.`
+            briefExplanation = `No physical bending detected in bent reference set. Possible misclassification.`
+          }
+        } else {
+          if (hasPhysicalBending) {
+            detailedExplanation = `The image shows clear signs of physical bending and structural deformation: ${parsedResponse.diagnosis.key_observations.join(
+              ', '
+            )}. This suggests a potential misclassification as this is in the "straight" reference set.`
+            briefExplanation = `Physical bending detected in straight reference set. Possible misclassification.`
+          } else if (hasPerspectiveEffects) {
+            detailedExplanation = `While some visual effects might suggest bending, these appear to be due to perspective or lighting rather than actual structural deformation. The plate appears to be correctly classified as straight.`
+            briefExplanation = `Apparent bending due to perspective effects; structurally straight as expected.`
+          } else {
+            detailedExplanation = `The image shows a properly aligned plate without any physical deformation, correctly matching its classification in the "straight" reference set.`
+            briefExplanation = `Image correctly classified as straight, showing no physical deformation.`
+          }
+        }
+
+        // Update the response with our context-specific explanations
+        parsedResponse.explanation = briefExplanation
+        parsedResponse.diagnosis.detailed_explanation = detailedExplanation
+
+        // Don't call handleValidationResult - we've already set everything we need
+        break
+      }
+
       case 'corrosion': {
         // Existing corrosion logic
         const foundCorrosion = parsedResponse.diagnosis?.key_observations?.some(
@@ -398,113 +660,6 @@ export async function validateImage(
                 ],
               }
         )
-        break
-      }
-
-      case 'connector_plates': {
-        // First check for clear indicators of physical bending
-        const hasPhysicalBending =
-          parsedResponse.diagnosis?.key_observations?.some((obs: string) => {
-            const lowerObs = obs.toLowerCase()
-            return (
-              lowerObs.includes('physical deformation') ||
-              lowerObs.includes('structural misalignment') ||
-              lowerObs.includes('actual bending') ||
-              (lowerObs.includes('gap') && lowerObs.includes('structural')) ||
-              // Add more specific physical indicators
-              (lowerObs.includes('bend') && lowerObs.includes('noticeable')) ||
-              (lowerObs.includes('warp') && !lowerObs.includes('camera')) ||
-              (lowerObs.includes('misaligned') &&
-                lowerObs.includes('intended')) ||
-              (lowerObs.includes('gap') && lowerObs.includes('between'))
-            )
-          })
-
-        // Check for observations that might be perspective/lighting effects
-        const hasPerspectiveEffects =
-          parsedResponse.diagnosis?.key_observations?.some((obs: string) => {
-            const lowerObs = obs.toLowerCase()
-            return (
-              lowerObs.includes('perspective') ||
-              lowerObs.includes('camera angle') ||
-              lowerObs.includes('lighting effect') ||
-              lowerObs.includes('shadow') ||
-              lowerObs.includes('viewing angle') ||
-              // Add specific perspective-related terms
-              (lowerObs.includes('appear') && lowerObs.includes('angle')) ||
-              lowerObs.includes('optical') ||
-              lowerObs.includes('illusion')
-            )
-          })
-
-        // Only consider it bent if we have clear physical evidence and not just perspective effects
-        const isBent = hasPhysicalBending && !hasPerspectiveEffects
-
-        const shouldBeBent = expectedState.toLowerCase() === 'bent'
-        const matchesExpectedSet =
-          (shouldBeBent && hasPhysicalBending) ||
-          (!shouldBeBent && !hasPhysicalBending)
-
-        // Update the response based on what we actually found
-        if (hasPhysicalBending) {
-          // If we found physical bending evidence, make sure our observations reflect this
-          parsedResponse.is_valid = shouldBeBent
-          parsedResponse.diagnosis.overall_assessment = shouldBeBent
-            ? 'Pass'
-            : 'Fail'
-          parsedResponse.diagnosis.matched_criteria = shouldBeBent
-            ? [
-                'Physical deformation confirmed',
-                'Structural bending verified',
-                'Matches bent reference set',
-              ]
-            : []
-          parsedResponse.diagnosis.failed_criteria = shouldBeBent
-            ? []
-            : [
-                'Physical deformation detected in straight reference set',
-                'Structural bending observed',
-                'Possible misclassification',
-              ]
-        }
-
-        // Create context-specific explanations
-        let detailedExplanation = ''
-        let briefExplanation = ''
-
-        if (shouldBeBent) {
-          if (hasPhysicalBending) {
-            detailedExplanation = `The image shows clear evidence of physical bending and structural deformation through multiple indicators: ${parsedResponse.diagnosis.key_observations.join(
-              ', '
-            )}. This correctly matches its classification in the "bent" reference set.`
-            briefExplanation = `Image correctly classified as bent, showing clear physical deformation.`
-          } else if (hasPerspectiveEffects) {
-            detailedExplanation = `While some visual effects might suggest bending, no clear physical deformation is evident. The observed effects may be due to camera angles or lighting. Additional images from different angles might help confirm the structural state.`
-            briefExplanation = `No clear physical bending detected. Consider additional viewing angles.`
-          } else {
-            detailedExplanation = `The image does not show sufficient evidence of physical bending or structural deformation, despite being in the "bent" reference set. This suggests a potential misclassification that needs review.`
-            briefExplanation = `No physical bending detected in bent reference set. Possible misclassification.`
-          }
-        } else {
-          if (hasPhysicalBending) {
-            detailedExplanation = `The image shows clear signs of physical bending and structural deformation: ${parsedResponse.diagnosis.key_observations.join(
-              ', '
-            )}. This suggests a potential misclassification as this is in the "straight" reference set.`
-            briefExplanation = `Physical bending detected in straight reference set. Possible misclassification.`
-          } else if (hasPerspectiveEffects) {
-            detailedExplanation = `While some visual effects might suggest bending, these appear to be due to perspective or lighting rather than actual structural deformation. The plate appears to be correctly classified as straight.`
-            briefExplanation = `Apparent bending due to perspective effects; structurally straight as expected.`
-          } else {
-            detailedExplanation = `The image shows a properly aligned plate without any physical deformation, correctly matching its classification in the "straight" reference set.`
-            briefExplanation = `Image correctly classified as straight, showing no physical deformation.`
-          }
-        }
-
-        // Update the response with our context-specific explanations
-        parsedResponse.explanation = briefExplanation
-        parsedResponse.diagnosis.detailed_explanation = detailedExplanation
-
-        // Don't call handleValidationResult - we've already set everything we need
         break
       }
 
@@ -651,23 +806,21 @@ export async function validateImage(
     const result: ValidationResult = {
       isValid: parsedResponse.is_valid,
       confidence: parsedResponse.confidence,
-      diagnosis: parsedResponse.diagnosis || {
-        overall_assessment: parsedResponse.is_valid ? 'Valid' : 'Invalid',
-        confidence_level: parsedResponse.confidence,
-        key_observations: parsedResponse.key_observations || [],
-        matched_criteria: parsedResponse.matched_criteria || [],
-        failed_criteria: parsedResponse.failed_criteria || [],
-        detailed_explanation:
-          parsedResponse.explanation || 'No detailed explanation provided',
-      },
+      diagnosis: parsedResponse.diagnosis,
       matchedCriteria:
         parsedResponse.matched_criteria ||
-        parsedResponse.key_observations ||
+        parsedResponse.diagnosis?.matched_criteria ||
         [],
-      failedCriteria: parsedResponse.failed_criteria || [],
+      failedCriteria:
+        parsedResponse.failed_criteria ||
+        parsedResponse.diagnosis?.failed_criteria ||
+        [],
       similarCases: [],
-      explanation: parsedResponse.explanation || 'No explanation provided',
+      explanation:
+        parsedResponse.explanation ||
+        parsedResponse.diagnosis?.detailed_explanation,
       features,
+      modelUsed: parsedResponse.modelUsed,
     }
 
     // If vector store is enabled, find and use similar cases
@@ -807,6 +960,7 @@ export async function validateImage(
       similarCases: [],
       explanation: error instanceof Error ? error.message : 'Unknown error',
       features: await extractImageFeatures(imageBuffer),
+      modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
     }
   }
 }

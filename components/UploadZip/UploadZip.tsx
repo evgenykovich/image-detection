@@ -221,6 +221,7 @@ export const UploadZip = () => {
   const [foldersNeedingPrompts, setFoldersNeedingPrompts] = useState<string[]>(
     []
   )
+  const [useGemini, setUseGemini] = useState(false)
 
   // Validation mode controls
   const [validationMode, setValidationMode] = useState<
@@ -249,6 +250,11 @@ export const UploadZip = () => {
       const base64Image = await convertToBase64(imageBlob)
       const folderPrompt = folderStructure[path]?.prompt || ''
 
+      console.log(
+        'Sending validation request with model:',
+        useGemini ? 'Gemini' : 'OpenAI'
+      )
+
       const response = await fetch('/api/validate-image', {
         method: 'POST',
         headers: {
@@ -260,6 +266,7 @@ export const UploadZip = () => {
           useVectorStore,
           isTrainingMode: validationMode === 'training',
           prompt: folderPrompt,
+          useGemini,
         }),
       })
 
@@ -268,6 +275,7 @@ export const UploadZip = () => {
       }
 
       const validationResult = await response.json()
+      console.log('Validation result:', validationResult)
 
       // Parse diagnosis if it's a JSON string
       let parsedDiagnosis: DiagnosisObject | undefined = undefined
@@ -373,29 +381,7 @@ export const UploadZip = () => {
       }
     } catch (error) {
       console.error('Error processing image:', error)
-      return {
-        filename,
-        path,
-        category: 'unknown',
-        expectedState: 'unknown',
-        detectedResult: 'Error processing image',
-        isValid: false,
-        confidence: 0,
-        diagnosis: {
-          overall_assessment: 'Error',
-          confidence_level: 0,
-          key_observations: ['Error processing image'],
-          matched_criteria: [],
-          failed_criteria: [],
-          detailed_explanation:
-            error instanceof Error ? error.message : 'Unknown error',
-        },
-        matchedCriteria: [],
-        failedCriteria: ['Validation error occurred'],
-        explanation: error instanceof Error ? error.message : 'Unknown error',
-        features: undefined,
-        similarCases: [],
-      }
+      throw error
     }
   }
 
@@ -859,6 +845,29 @@ export const UploadZip = () => {
               {validationMode === 'training'
                 ? 'Store images as ground truth examples'
                 : 'Validate images against existing examples'}
+            </p>
+          </div>
+
+          {/* Model Selection */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-white/90">Model</label>
+            <select
+              value={useGemini ? 'gemini' : 'openai'}
+              onChange={(e) => setUseGemini(e.target.value === 'gemini')}
+              className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
+              disabled={isProcessing}
+            >
+              <option value="openai" className="text-black">
+                OpenAI GPT-4 Vision
+              </option>
+              <option value="gemini" className="text-black">
+                Google Gemini
+              </option>
+            </select>
+            <p className="text-xs text-white/60">
+              {useGemini
+                ? 'Using Google Gemini model for image analysis'
+                : 'Using OpenAI GPT-4 Vision for image analysis'}
             </p>
           </div>
 

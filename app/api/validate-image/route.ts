@@ -180,6 +180,7 @@ export async function POST(req: Request) {
       useVectorStore = true,
       isTrainingMode = false,
       prompt,
+      useGemini = false,
     } = await req.json()
 
     if (!imageBase64 || !folderPath) {
@@ -198,6 +199,7 @@ export async function POST(req: Request) {
       promptLength: prompt?.length,
       useVectorStore,
       isTrainingMode,
+      useGemini,
     })
 
     // Extract category and state from folder path
@@ -215,6 +217,7 @@ export async function POST(req: Request) {
         storeResults: isTrainingMode || useVectorStore,
         measurement, // Pass the measurement to validation
         prompt: prompt?.trim() || undefined, // Ensure prompt is trimmed and undefined if empty
+        useGemini, // Add useGemini to validation options
       }
 
       // Log validation configuration
@@ -225,6 +228,7 @@ export async function POST(req: Request) {
         hasPrompt: !!validationOptions.prompt,
         isTrainingMode,
         useVectorStore,
+        useGemini,
       })
 
       // Validate the image using folder-based validation

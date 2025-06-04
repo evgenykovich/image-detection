@@ -47,120 +47,12 @@ const getValidationConfig = (folderPath: string): ValidationConfig => {
 
   const category = categoryFolder.replace(/^\d{2}-/, '')
   const expectedState = stateFolder.replace(/^\d{2}-/, '')
-  debugger
-  console.log(category, expectedState)
-  let prompt = ''
-  switch (category.toLowerCase()) {
-    case 'corrosion':
-      prompt = `Analyze this image for signs of corrosion. This image comes from a reference set of "${expectedState.toLowerCase()}" examples.
 
-Key points to check:
-- Look for rust, discoloration, pitting, or surface degradation
-- Check edges and joints for signs of deterioration
-- Note any flaking paint or surface irregularities
-
-Your response should clearly indicate:
-1. Whether you found corrosion or not
-2. Your confidence in the assessment
-3. Specific evidence supporting your conclusion
-4. How this matches or differs from what we expect in a "${expectedState.toLowerCase()}" example
-
-Remember: This image is from our "${expectedState.toLowerCase()}" reference set, so finding corrosion in a "no corrosion" set or no corrosion in a "corrosion" set would indicate a potential misclassification.`
-      break
-    case 'threads':
-      prompt = `Analyze this image for thread features. This image comes from a reference set of "${expectedState.toLowerCase()}" examples.
-
-Key points to check:
-- Look for visible thread patterns
-- Check thread consistency and condition
-- Note any damage or wear to threads
-
-Your response should clearly indicate:
-1. Whether threads are visible and in what condition
-2. Your confidence in the assessment
-3. Specific evidence supporting your conclusion
-4. How this matches or differs from what we expect in a "${expectedState.toLowerCase()}" example
-
-Remember: This image is from our "${expectedState.toLowerCase()}" reference set, so finding threads when they shouldn't be visible or not finding them when they should be would indicate a potential misclassification.`
-      break
-    case 'connector_plates':
-      prompt = `Analyze this image for connector plate alignment. This image comes from a reference set of "${expectedState.toLowerCase()}" examples.
-
-Key points to check:
-- Look for actual physical deformation, not perspective illusions
-- Check for true bending vs. apparent bending due to camera angle
-- Verify if gaps or misalignments are real structural issues or viewing angle effects
-- Consider lighting effects that might create false impressions of bending
-
-Specific Analysis Steps:
-1. Look for multiple visual cues that confirm actual bending:
-   - Consistent deformation across different viewing angles (if visible)
-   - Physical gaps that can't be explained by perspective
-   - Clear structural misalignment beyond camera angle effects
-2. Rule out false positives:
-   - Perspective distortion from camera angle
-   - Shadow effects creating illusion of gaps
-   - Lighting creating appearance of warping
-
-Your response should clearly indicate:
-1. Whether the plate shows true physical bending (not perspective effects)
-2. Your confidence in the assessment
-3. Specific evidence supporting your conclusion, distinguishing between actual deformation and visual effects
-4. How this matches or differs from what we expect in a "${expectedState.toLowerCase()}" example
-
-Remember: This image is from our "${expectedState.toLowerCase()}" reference set. Be careful to distinguish between actual bending and perspective/lighting effects before suggesting a misclassification.`
-      break
-    case 'cotter_pin':
-      prompt = `Analyze this image for cotter pin presence and installation. This image comes from a reference set of "${expectedState.toLowerCase()}" examples.
-
-Key points to check:
-- Look for the presence/absence of cotter pins
-- Check pin installation and end bending
-- Note any missing or loose pins
-
-Your response should clearly indicate:
-1. Whether cotter pins are present and properly installed
-2. Your confidence in the assessment
-3. Specific evidence supporting your conclusion
-4. How this matches or differs from what we expect in a "${expectedState.toLowerCase()}" example
-
-Remember: This image is from our "${expectedState.toLowerCase()}" reference set, so finding pins when they should be missing or not finding them when they should be present would indicate a potential misclassification.`
-      break
-    case 'cable':
-      prompt = `Analyze this image for cable diameter compliance. This image comes from a reference set of "${expectedState.toLowerCase()}" examples.
-
-Key points to check:
-- Assess cable diameter relative to requirements
-- Check for consistent diameter throughout
-- Note any wear or damage
-
-Your response should clearly indicate:
-1. Whether the cable meets minimum diameter requirements
-2. Your confidence in the assessment
-3. Specific evidence supporting your conclusion
-4. How this matches or differs from what we expect in a "${expectedState.toLowerCase()}" example
-
-Remember: This image is from our "${expectedState.toLowerCase()}" reference set, so finding compliant cables in a "non-compliant" set or undersized cables in a "compliant" set would indicate a potential misclassification.`
-      break
-    case 'connection':
-      prompt = `Analyze this image for connection security. This image comes from a reference set of "${expectedState.toLowerCase()}" examples.
-
-Key points to check:
-- Assess connection tightness and security
-- Check component alignment
-- Note any loose or improper connections
-
-Your response should clearly indicate:
-1. Whether the connection is secure and proper
-2. Your confidence in the assessment
-3. Specific evidence supporting your conclusion
-4. How this matches or differs from what we expect in a "${expectedState.toLowerCase()}" example
-
-Remember: This image is from our "${expectedState.toLowerCase()}" reference set, so finding secure connections in an "unsecure" set or loose connections in a "secure" set would indicate a potential misclassification.`
-      break
-    default:
-      prompt = `Analyze this image and determine if it shows ${expectedState.toLowerCase()} for ${category.toLowerCase()}.`
-  }
+  // Simple prompt for all categories
+  const prompt = `Look at this image and tell me if it shows a ${expectedState.toLowerCase()} ${category.toLowerCase()}.
+Focus only on what you can directly observe in the image.
+Do not make assumptions or reference any criteria not visible in the image.
+Be specific about physical characteristics you can see.`
 
   return {
     category,
