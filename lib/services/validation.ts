@@ -29,11 +29,18 @@ function buildSimplePrompt(
       'Thread pattern should be consistent',
       'No visible damage to threads',
     ],
-    corrosion: [
-      'Surface should be free of rust',
-      'No visible discoloration',
-      'No surface degradation',
-    ],
+    corrosion:
+      expectedState.toLowerCase() === 'corroded'
+        ? [
+            'Surface should show signs of rust or discoloration',
+            'Visible surface degradation or pitting',
+            'Material deterioration should be evident',
+          ]
+        : [
+            'Surface should be free of rust',
+            'No visible discoloration',
+            'No surface degradation',
+          ],
     connector_plates: [
       'The main body of the plate should maintain a consistent vertical or horizontal orientation',
       'The mounting surfaces should be level and parallel',
@@ -176,6 +183,36 @@ Important:
 - explanation should provide a brief, clear summary of the validation result`
 }
 
+// Helper function to update validation result
+function handleValidationResult(
+  response: any,
+  matchesExpectedSet: boolean,
+  expectedState: string,
+  criteria: {
+    pass: string[]
+    fail: string[]
+  }
+) {
+  response.is_valid = matchesExpectedSet
+  response.diagnosis.overall_assessment = matchesExpectedSet ? 'Pass' : 'Fail'
+
+  if (matchesExpectedSet) {
+    response.diagnosis.matched_criteria = criteria.pass
+    response.diagnosis.failed_criteria = []
+    response.explanation = `Image correctly matches the ${expectedState} reference set.`
+    response.diagnosis.detailed_explanation =
+      `The image shows the expected characteristics for the ${expectedState} category, ` +
+      `confirming its proper classification in the reference set.`
+  } else {
+    response.diagnosis.matched_criteria = []
+    response.diagnosis.failed_criteria = criteria.fail
+    response.explanation = `Potential misclassification: Image may not belong in the ${expectedState} reference set.`
+    response.diagnosis.detailed_explanation =
+      `The image shows characteristics that differ from what we expect in the ${expectedState} reference set. ` +
+      `This suggests a potential misclassification that needs review.`
+  }
+}
+
 export async function validateImage(
   imageBuffer: Buffer,
   category: Category,
@@ -261,6 +298,352 @@ export async function validateImage(
         confidence: 0.5,
         explanation: response.content,
         key_observations: [response.content],
+      }
+    }
+
+    // Special handling for each category
+    switch (category.toLowerCase()) {
+      case 'corrosion': {
+        // Existing corrosion logic
+        const foundCorrosion = parsedResponse.diagnosis?.key_observations?.some(
+          (obs: string) =>
+            obs.toLowerCase().includes('corrosion') ||
+            obs.toLowerCase().includes('rust') ||
+            obs.toLowerCase().includes('deterioration')
+        )
+
+        const isNoCorrosionSet =
+          expectedState.toLowerCase().includes('no') ||
+          expectedState.toLowerCase() === 'clean'
+        const isCorrosionSet = !isNoCorrosionSet
+        const matchesExpectedSet =
+          (isNoCorrosionSet && !foundCorrosion) ||
+          (isCorrosionSet && foundCorrosion)
+
+        handleValidationResult(
+          parsedResponse,
+          matchesExpectedSet,
+          expectedState,
+          isNoCorrosionSet
+            ? {
+                pass: [
+                  'Surface is free from corrosion',
+                  'No visible deterioration',
+                  'Material integrity maintained',
+                ],
+                fail: [
+                  'Corrosion detected in no-corrosion reference set',
+                  'Surface shows unexpected deterioration',
+                  'Possible misclassification',
+                ],
+              }
+            : {
+                pass: [
+                  'Corrosion clearly visible',
+                  'Expected deterioration present',
+                  'Matches corrosion reference set',
+                ],
+                fail: [
+                  'No corrosion detected in corrosion reference set',
+                  'Surface appears unexpectedly clean',
+                  'Possible misclassification',
+                ],
+              }
+        )
+        break
+      }
+
+      case 'threads': {
+        const foundThreads = parsedResponse.diagnosis?.key_observations?.some(
+          (obs: string) =>
+            obs.toLowerCase().includes('thread') &&
+            !obs.toLowerCase().includes('no thread')
+        )
+
+        const shouldHaveThreads =
+          !expectedState.toLowerCase().includes('no') &&
+          (expectedState.toLowerCase().includes('visible') ||
+            expectedState.toLowerCase().includes('present'))
+        const matchesExpectedSet =
+          (shouldHaveThreads && foundThreads) ||
+          (!shouldHaveThreads && !foundThreads)
+
+        handleValidationResult(
+          parsedResponse,
+          matchesExpectedSet,
+          expectedState,
+          shouldHaveThreads
+            ? {
+                pass: [
+                  'Threads clearly visible',
+                  'Thread pattern identifiable',
+                  'Expected thread features present',
+                ],
+                fail: [
+                  'No threads visible in threaded reference set',
+                  'Expected threads not found',
+                  'Possible misclassification',
+                ],
+              }
+            : {
+                pass: [
+                  'No threads visible',
+                  'Smooth surface as expected',
+                  'Matches thread-free reference',
+                ],
+                fail: [
+                  'Unexpected threads found',
+                  'Surface shows thread pattern',
+                  'Possible misclassification',
+                ],
+              }
+        )
+        break
+      }
+
+      case 'connector_plates': {
+        // First check for clear indicators of physical bending
+        const hasPhysicalBending =
+          parsedResponse.diagnosis?.key_observations?.some((obs: string) => {
+            const lowerObs = obs.toLowerCase()
+            return (
+              lowerObs.includes('physical deformation') ||
+              lowerObs.includes('structural misalignment') ||
+              lowerObs.includes('actual bending') ||
+              (lowerObs.includes('gap') && lowerObs.includes('structural')) ||
+              // Add more specific physical indicators
+              (lowerObs.includes('bend') && lowerObs.includes('noticeable')) ||
+              (lowerObs.includes('warp') && !lowerObs.includes('camera')) ||
+              (lowerObs.includes('misaligned') &&
+                lowerObs.includes('intended')) ||
+              (lowerObs.includes('gap') && lowerObs.includes('between'))
+            )
+          })
+
+        // Check for observations that might be perspective/lighting effects
+        const hasPerspectiveEffects =
+          parsedResponse.diagnosis?.key_observations?.some((obs: string) => {
+            const lowerObs = obs.toLowerCase()
+            return (
+              lowerObs.includes('perspective') ||
+              lowerObs.includes('camera angle') ||
+              lowerObs.includes('lighting effect') ||
+              lowerObs.includes('shadow') ||
+              lowerObs.includes('viewing angle') ||
+              // Add specific perspective-related terms
+              (lowerObs.includes('appear') && lowerObs.includes('angle')) ||
+              lowerObs.includes('optical') ||
+              lowerObs.includes('illusion')
+            )
+          })
+
+        // Only consider it bent if we have clear physical evidence and not just perspective effects
+        const isBent = hasPhysicalBending && !hasPerspectiveEffects
+
+        const shouldBeBent = expectedState.toLowerCase() === 'bent'
+        const matchesExpectedSet =
+          (shouldBeBent && hasPhysicalBending) ||
+          (!shouldBeBent && !hasPhysicalBending)
+
+        // Update the response based on what we actually found
+        if (hasPhysicalBending) {
+          // If we found physical bending evidence, make sure our observations reflect this
+          parsedResponse.is_valid = shouldBeBent
+          parsedResponse.diagnosis.overall_assessment = shouldBeBent
+            ? 'Pass'
+            : 'Fail'
+          parsedResponse.diagnosis.matched_criteria = shouldBeBent
+            ? [
+                'Physical deformation confirmed',
+                'Structural bending verified',
+                'Matches bent reference set',
+              ]
+            : []
+          parsedResponse.diagnosis.failed_criteria = shouldBeBent
+            ? []
+            : [
+                'Physical deformation detected in straight reference set',
+                'Structural bending observed',
+                'Possible misclassification',
+              ]
+        }
+
+        // Create context-specific explanations
+        let detailedExplanation = ''
+        let briefExplanation = ''
+
+        if (shouldBeBent) {
+          if (hasPhysicalBending) {
+            detailedExplanation = `The image shows clear evidence of physical bending and structural deformation through multiple indicators: ${parsedResponse.diagnosis.key_observations.join(
+              ', '
+            )}. This correctly matches its classification in the "bent" reference set.`
+            briefExplanation = `Image correctly classified as bent, showing clear physical deformation.`
+          } else if (hasPerspectiveEffects) {
+            detailedExplanation = `While some visual effects might suggest bending, no clear physical deformation is evident. The observed effects may be due to camera angles or lighting. Additional images from different angles might help confirm the structural state.`
+            briefExplanation = `No clear physical bending detected. Consider additional viewing angles.`
+          } else {
+            detailedExplanation = `The image does not show sufficient evidence of physical bending or structural deformation, despite being in the "bent" reference set. This suggests a potential misclassification that needs review.`
+            briefExplanation = `No physical bending detected in bent reference set. Possible misclassification.`
+          }
+        } else {
+          if (hasPhysicalBending) {
+            detailedExplanation = `The image shows clear signs of physical bending and structural deformation: ${parsedResponse.diagnosis.key_observations.join(
+              ', '
+            )}. This suggests a potential misclassification as this is in the "straight" reference set.`
+            briefExplanation = `Physical bending detected in straight reference set. Possible misclassification.`
+          } else if (hasPerspectiveEffects) {
+            detailedExplanation = `While some visual effects might suggest bending, these appear to be due to perspective or lighting rather than actual structural deformation. The plate appears to be correctly classified as straight.`
+            briefExplanation = `Apparent bending due to perspective effects; structurally straight as expected.`
+          } else {
+            detailedExplanation = `The image shows a properly aligned plate without any physical deformation, correctly matching its classification in the "straight" reference set.`
+            briefExplanation = `Image correctly classified as straight, showing no physical deformation.`
+          }
+        }
+
+        // Update the response with our context-specific explanations
+        parsedResponse.explanation = briefExplanation
+        parsedResponse.diagnosis.detailed_explanation = detailedExplanation
+
+        // Don't call handleValidationResult - we've already set everything we need
+        break
+      }
+
+      case 'cotter_pin': {
+        const pinPresent = parsedResponse.diagnosis?.key_observations?.some(
+          (obs: string) =>
+            obs.toLowerCase().includes('pin') &&
+            !obs.toLowerCase().includes('missing') &&
+            !obs.toLowerCase().includes('absent')
+        )
+
+        const shouldBePresent = expectedState.toLowerCase() === 'present'
+        const matchesExpectedSet =
+          (shouldBePresent && pinPresent) || (!shouldBePresent && !pinPresent)
+
+        handleValidationResult(
+          parsedResponse,
+          matchesExpectedSet,
+          expectedState,
+          shouldBePresent
+            ? {
+                pass: [
+                  'Cotter pin properly installed',
+                  'Pin ends correctly bent',
+                  'Matches present reference set',
+                ],
+                fail: [
+                  'Cotter pin missing from assembly',
+                  'Expected pin not found',
+                  'Possible misclassification',
+                ],
+              }
+            : {
+                pass: [
+                  'No cotter pin present as expected',
+                  'Assembly matches missing pin reference',
+                  'Correct absence verified',
+                ],
+                fail: [
+                  'Unexpected cotter pin found',
+                  'Pin present when should be missing',
+                  'Possible misclassification',
+                ],
+              }
+        )
+        break
+      }
+
+      case 'cable': {
+        const meetsMinimum = parsedResponse.diagnosis?.key_observations?.some(
+          (obs: string) =>
+            obs.toLowerCase().includes('meets') ||
+            obs.toLowerCase().includes('exceeds') ||
+            obs.toLowerCase().includes('compliant')
+        )
+
+        const shouldMeetMinimum = expectedState.toLowerCase() === 'compliant'
+        const matchesExpectedSet =
+          (shouldMeetMinimum && meetsMinimum) ||
+          (!shouldMeetMinimum && !meetsMinimum)
+
+        handleValidationResult(
+          parsedResponse,
+          matchesExpectedSet,
+          expectedState,
+          shouldMeetMinimum
+            ? {
+                pass: [
+                  'Cable meets minimum diameter',
+                  'Dimensions within specification',
+                  'Matches compliant reference set',
+                ],
+                fail: [
+                  'Cable diameter below minimum',
+                  'Does not meet size requirement',
+                  'Possible misclassification',
+                ],
+              }
+            : {
+                pass: [
+                  'Cable confirmed below minimum',
+                  'Undersized as expected',
+                  'Matches non-compliant reference',
+                ],
+                fail: [
+                  'Cable unexpectedly meets minimum',
+                  'Size exceeds expected non-compliant state',
+                  'Possible misclassification',
+                ],
+              }
+        )
+        break
+      }
+
+      case 'connection': {
+        const isSecure = parsedResponse.diagnosis?.key_observations?.some(
+          (obs: string) =>
+            obs.toLowerCase().includes('secure') ||
+            obs.toLowerCase().includes('proper') ||
+            obs.toLowerCase().includes('tight')
+        )
+
+        const shouldBeSecure = ['secure', 'proper', 'connected'].includes(
+          expectedState.toLowerCase()
+        )
+        const matchesExpectedSet =
+          (shouldBeSecure && isSecure) || (!shouldBeSecure && !isSecure)
+
+        handleValidationResult(
+          parsedResponse,
+          matchesExpectedSet,
+          expectedState,
+          shouldBeSecure
+            ? {
+                pass: [
+                  'Connection properly secured',
+                  'Components correctly fastened',
+                  'Matches secure reference set',
+                ],
+                fail: [
+                  'Connection appears loose',
+                  'Expected security not found',
+                  'Possible misclassification',
+                ],
+              }
+            : {
+                pass: [
+                  'Connection appropriately unsecured',
+                  'Expected loose state verified',
+                  'Matches unsecure reference',
+                ],
+                fail: [
+                  'Unexpected secure connection',
+                  'Components improperly fastened',
+                  'Possible misclassification',
+                ],
+              }
+        )
+        break
       }
     }
 
