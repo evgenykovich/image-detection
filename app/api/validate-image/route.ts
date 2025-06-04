@@ -138,6 +138,20 @@ export async function POST(request: Request) {
       validationOptions
     )
 
+    // If we have a perfect vector store match (confidence > 0.99), adjust the confidence to 100%
+    if (useVectorStore && result.similarCases?.length > 0) {
+      const perfectMatch = result.similarCases.some((c) => c.confidence > 0.99)
+      if (perfectMatch) {
+        result.confidence = 1.0
+        if (result.diagnosis) {
+          result.diagnosis.confidence_level = 1.0
+          result.diagnosis.key_observations.push(
+            'Exact match found in reference database'
+          )
+        }
+      }
+    }
+
     // Add mode information to response
     const response = {
       ...result,

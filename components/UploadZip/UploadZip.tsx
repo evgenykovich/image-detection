@@ -183,6 +183,7 @@ interface ValidationResult {
           detailed_explanation: string
         }
   }>
+  vectorStoreUsed?: boolean
 }
 
 interface FolderStructure {
@@ -510,6 +511,7 @@ export const UploadZip = () => {
             return c
           }
         ),
+        vectorStoreUsed: validationResult.vectorStoreUsed,
       }
     } catch (error) {
       console.error('Error processing image:', error)
@@ -1406,6 +1408,19 @@ export const UploadZip = () => {
                                 </span>
                               </div>
                             )}
+                            {result.vectorStoreUsed &&
+                              result.similarCases &&
+                              result.similarCases.length > 0 && (
+                                <div className="flex items-center gap-2 px-2 py-1 bg-blue-500/20 rounded-full">
+                                  <span className="text-sm text-blue-400">
+                                    {result.similarCases.length} similar{' '}
+                                    {result.similarCases.length === 1
+                                      ? 'case'
+                                      : 'cases'}{' '}
+                                    found
+                                  </span>
+                                </div>
+                              )}
                           </div>
                         </div>
                       </AccordionTrigger>
@@ -1694,6 +1709,38 @@ export const UploadZip = () => {
                               )}
                             </div>
                           </div>
+
+                          {/* Vector Store Matches */}
+                          {result.vectorStoreUsed &&
+                            result.similarCases &&
+                            result.similarCases.length > 0 && (
+                              <div className="mt-4 p-4 bg-blue-500/10 rounded-lg border border-blue-500/20">
+                                <h4 className="text-sm font-medium text-blue-400 mb-2">
+                                  Vector Store Matches
+                                </h4>
+                                <div className="space-y-2">
+                                  {result.similarCases.map(
+                                    (similarCase, index) => (
+                                      <div
+                                        key={index}
+                                        className="flex items-center justify-between text-sm"
+                                      >
+                                        <span className="text-white/70">
+                                          {similarCase.category} (
+                                          {similarCase.state})
+                                        </span>
+                                        <span className="text-blue-400">
+                                          {(
+                                            similarCase.confidence * 100
+                                          ).toFixed(1)}
+                                          % match
+                                        </span>
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            )}
                         </div>
                       </AccordionContent>
                     </AccordionItem>
