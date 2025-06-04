@@ -10,7 +10,18 @@ const pinecone = new Pinecone({
   apiKey: process.env.PINECONE_API_KEY!,
 })
 
+// Initialize index
 const index = pinecone.index('image-validation')
+
+// Helper to get namespaced index
+function getNamespacedIndex(namespace?: string) {
+  if (!namespace) {
+    console.warn('No namespace provided, using default namespace')
+    return index.namespace('_default_')
+  }
+  console.log('Using namespace:', namespace)
+  return index.namespace(namespace)
+}
 
 // Helper to generate description for embedding
 function generateDescription(features: ImageFeatures): string {
@@ -31,13 +42,15 @@ export async function storeValidationCase(
   diagnosis: string,
   keyFeatures: string[],
   confidence: number = 0.5, // Default confidence if not provided
-  prompt?: string // Add prompt parameter
+  prompt?: string, // Add prompt parameter
+  namespace?: string // Default to root namespace if not provided
 ) {
   try {
     console.log('Storing validation case:', {
       category,
       state,
       confidence,
+      namespace,
       features: {
         dimensions: features.metadata.dimensions,
         format: features.metadata.format,
@@ -113,14 +126,19 @@ export async function storeValidationCase(
 
     const vector = response.data[0].embedding
 
+    // Get the namespaced index
+    const namespaceIndex = getNamespacedIndex(namespace)
+
     // Store in Pinecone with confidence in the ID for better tracking
     const id = `${category}-${state}-${confidence.toFixed(2)}-${Date.now()}`
     console.log('Upserting to Pinecone:', {
       id,
       metadata: { ...metadata, diagnosis: undefined },
+      namespace: namespace || '_default_',
     })
 
-    await index.upsert([
+    // Upsert using namespaced index - don't pass namespace parameter since we're using namespaced index
+    await namespaceIndex.upsert([
       {
         id,
         values: vector,
@@ -144,9 +162,19 @@ export async function storeValidationCase(
 export async function findSimilarCases(
   features: ImageFeatures,
   category: Category,
-  limit: number = 5
+  limit: number = 5,
+  namespace?: string
 ): Promise<SimilarCase[]> {
   try {
+    console.log('Finding similar cases:', {
+      category,
+      namespace,
+      features: {
+        dimensions: features.metadata.dimensions,
+        format: features.metadata.format,
+      },
+    })
+
     // Get embeddings for the query
     const response = await openai.embeddings.create({
       model: 'text-embedding-3-small',
@@ -156,15 +184,27 @@ export async function findSimilarCases(
 
     const queryVector = response.data[0].embedding
 
-    // Query Pinecone
-    const queryResponse = await index.query({
+    // Get the namespaced index
+    const namespaceIndex = getNamespacedIndex(namespace)
+
+    // Query using namespaced index - without category filter to get more results
+    const queryResponse = await namespaceIndex.query({
       vector: queryVector,
-      filter: { category }, // Filter by category
-      topK: limit,
+      topK: limit * 2, // Request more results since we'll filter later
       includeMetadata: true,
     })
 
-    // Map results to SimilarCase type
+    console.log('Query response:', {
+      totalMatches: queryResponse.matches.length,
+      namespace: namespace || '_default_',
+      matches: queryResponse.matches.map((m) => ({
+        id: m.id,
+        score: m.score,
+        metadata: m.metadata,
+      })),
+    })
+
+    // Map results to SimilarCase type and filter by category if needed
     return (
       queryResponse.matches
         .filter((match) => match.metadata)
@@ -192,13 +232,14 @@ export async function findSimilarCases(
               visualFeatures: [],
             },
             diagnosis: metadata.diagnosis?.toString() || '',
-            // Use stored confidence if available, otherwise use match score
             confidence: Number(metadata.confidence) || match.score || 0,
             keyFeatures: JSON.parse(metadata.keyFeatures as string),
           }
         })
-        // Sort by confidence, highest first
+        // Sort by confidence/score, highest first
         .sort((a, b) => b.confidence - a.confidence)
+        // Take the top N results
+        .slice(0, limit)
     )
   } catch (error) {
     console.warn('Failed to find similar cases:', error)

@@ -47,34 +47,12 @@ const getValidationConfig = (folderPath: string): ValidationConfig => {
 
   const category = categoryFolder.replace(/^\d{2}-/, '')
   const expectedState = stateFolder.replace(/^\d{2}-/, '')
-  debugger
-  console.log(category, expectedState)
-  let prompt = ''
-  switch (category.toLowerCase()) {
-    case 'corrosion':
-      prompt = `Analyze this image and determine if there is any visible corrosion. Focus on signs of rust, deterioration, or surface degradation. The image should show ${expectedState.toLowerCase()}.`
-      break
-    case 'threads':
-      prompt = `Examine this image and determine if there are visible threads on the component. The threads should be ${expectedState.toLowerCase()}.`
-      break
-    case 'connector plates':
-      prompt = `Analyze this image and determine if the connector plate is ${expectedState.toLowerCase()}. Look for any bending, straightness, or deformation.`
-      break
-    case 'cotter pins':
-      prompt = `Examine this image and determine if the cotter pins are ${expectedState.toLowerCase()}. Look for the presence or absence of cotter pins in the assembly.`
-      break
-    case 'spacer plates':
-      prompt = `Analyze this image and determine if the spacer plates are ${expectedState.toLowerCase()}. Check for proper placement and presence of spacer plates.`
-      break
-    case 'postitive connection':
-      prompt = `Examine this image and verify if the bolts are ${expectedState.toLowerCase()}. Check for proper bolt installation and presence.`
-      break
-    case 'cable diameter':
-      prompt = `Measure and verify if the cable diameter meets the minimum 38-inch requirement. Look for any signs that indicate the cable diameter is insufficient.`
-      break
-    default:
-      prompt = `Analyze this image and determine if it shows ${expectedState.toLowerCase()} for ${category.toLowerCase()}.`
-  }
+
+  // Simple prompt for all categories
+  const prompt = `Look at this image and tell me if it shows a ${expectedState.toLowerCase()} ${category.toLowerCase()}.
+Focus only on what you can directly observe in the image.
+Do not make assumptions or reference any criteria not visible in the image.
+Be specific about physical characteristics you can see.`
 
   return {
     category,
