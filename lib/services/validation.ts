@@ -24,10 +24,10 @@ const geminiModel = new GoogleGenerativeAI(
 interface ValidationOptions {
   useVectorStore: boolean
   isGroundTruth?: boolean
-  storeResults?: boolean
   measurement?: string
   prompt?: string
   useGemini?: boolean
+  namespace?: string
 }
 
 async function getModelResponse(
@@ -159,13 +159,13 @@ export async function validateImage(
   options: ValidationOptions = {
     useVectorStore: true,
     isGroundTruth: false,
-    storeResults: true,
     useGemini: false,
   }
 ): Promise<ValidationResult> {
   try {
     console.log('Using Gemini:', options.useGemini)
     console.log('Custom prompt:', options.prompt)
+    console.log('Using namespace:', options.namespace)
     const features = await extractImageFeatures(imageBuffer)
 
     if (options.isGroundTruth) {
@@ -197,21 +197,20 @@ export async function validateImage(
         },
       }
 
-      if (options.storeResults) {
-        try {
-          await storeValidationCase(
-            `data:image/jpeg;base64,${imageBuffer.toString('base64')}`,
-            category,
-            expectedState,
-            features,
-            groundTruthResult.diagnosis.detailed_explanation,
-            groundTruthResult.matchedCriteria,
-            1.0,
-            options.prompt
-          )
-        } catch (error) {
-          console.warn('Failed to store ground truth case:', error)
-        }
+      try {
+        await storeValidationCase(
+          `data:image/jpeg;base64,${imageBuffer.toString('base64')}`,
+          category,
+          expectedState,
+          features,
+          groundTruthResult.diagnosis.detailed_explanation,
+          groundTruthResult.matchedCriteria,
+          1.0,
+          options.prompt,
+          options.namespace
+        )
+      } catch (error) {
+        console.warn('Failed to store ground truth case:', error)
       }
 
       return groundTruthResult
@@ -266,8 +265,23 @@ export async function validateImage(
 
     // If vector store is enabled, find and use similar cases
     if (options.useVectorStore) {
+      console.log('Vector store enabled, searching for similar cases...')
       try {
-        const similarCases = await findSimilarCases(features, category)
+        const similarCases = await findSimilarCases(
+          features,
+          category,
+          5, // Default limit
+          options.namespace
+        )
+        console.log('Found similar cases:', {
+          count: similarCases.length,
+          cases: similarCases.map((c) => ({
+            category: c.category,
+            state: c.state,
+            confidence: c.confidence,
+          })),
+        })
+
         result.similarCases = similarCases
 
         // Adjust confidence based on similar cases if we have high confidence matches
@@ -276,6 +290,11 @@ export async function validateImage(
         )
 
         if (highConfidenceCases.length > 0) {
+          console.log('Found high confidence matches:', {
+            count: highConfidenceCases.length,
+            confidences: highConfidenceCases.map((c) => c.confidence),
+          })
+
           const totalWeight = highConfidenceCases.reduce(
             (sum, c) => sum + c.confidence,
             0
@@ -295,10 +314,14 @@ export async function validateImage(
               mostSimilar.confidence * 100
             ).toFixed(1)}% confidence`
           )
+        } else {
+          console.log('No high confidence matches found')
         }
       } catch (error) {
         console.warn('Failed to find or process similar cases:', error)
       }
+    } else {
+      console.log('Vector store disabled, skipping similar case search')
     }
 
     return result

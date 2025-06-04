@@ -9,7 +9,7 @@ if (!PINECONE_API_KEY) {
 
 // Create Pinecone client with validated API key
 const pinecone = new Pinecone({
-  apiKey: PINECONE_API_KEY,
+  apiKey: process.env.PINECONE_API_KEY!,
 })
 
 async function initPineconeIndex() {

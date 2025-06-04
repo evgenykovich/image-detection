@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -27,6 +27,7 @@ import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import { DropZoneUpload } from '../DropZoneUpload'
 import { Download, Folder, ChevronDown, Loader2 } from 'lucide-react'
+import { useToast } from '@/components/ui/use-toast'
 
 interface ValidationResponse {
   isValid: boolean
@@ -202,6 +203,7 @@ interface DiagnosisObject {
 }
 
 export const UploadZip = () => {
+  const { toast } = useToast()
   const [zipFile, setZipFile] = useState<File | null>(null)
   const [folderStructure, setFolderStructure] = useState<FolderStructure>({})
   const [selectedFolders, setSelectedFolders] = useState<string[]>([])
@@ -231,6 +233,135 @@ export const UploadZip = () => {
 
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false)
   const [exportFileName, setExportFileName] = useState('validation-results')
+  const [isClearingVectorStore, setIsClearingVectorStore] = useState(false)
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false)
+  const [vectorStats, setVectorStats] = useState<{
+    totalVectors: number
+    categories: { [key: string]: number }
+  } | null>(null)
+  const [isLoadingVectors, setIsLoadingVectors] = useState(false)
+  const [selectedNamespace, setSelectedNamespace] = useState<string>('')
+  const [availableNamespaces, setAvailableNamespaces] = useState<
+    Array<{ id: string; name: string }>
+  >([])
+  const [isAddingNamespace, setIsAddingNamespace] = useState(false)
+  const [newNamespaceName, setNewNamespaceName] = useState('')
+
+  // Load namespaces on component mount
+  useEffect(() => {
+    loadNamespaces()
+  }, [])
+
+  // Load vector stats when namespace changes
+  useEffect(() => {
+    if (selectedNamespace) {
+      loadVectorStats()
+    }
+  }, [selectedNamespace])
+
+  const loadNamespaces = async () => {
+    try {
+      const response = await fetch('/api/namespaces')
+      if (!response.ok) throw new Error('Failed to load namespaces')
+      const data = await response.json()
+      setAvailableNamespaces(data.namespaces)
+
+      // Select first namespace if none selected
+      if (data.namespaces.length > 0 && !selectedNamespace) {
+        setSelectedNamespace(data.namespaces[0].id)
+      }
+    } catch (error) {
+      console.error('Error loading namespaces:', error)
+    }
+  }
+
+  const handleAddNamespace = async () => {
+    try {
+      setIsAddingNamespace(true)
+      const response = await fetch('/api/namespaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newNamespaceName }),
+      })
+
+      if (!response.ok) throw new Error('Failed to add namespace')
+
+      await loadNamespaces()
+      setNewNamespaceName('')
+      setIsAddingNamespace(false)
+      toast({
+        title: 'Success',
+        description: 'Namespace added successfully',
+        variant: 'default',
+      })
+    } catch (error) {
+      console.error('Error adding namespace:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to add namespace',
+        variant: 'destructive',
+      })
+      setIsAddingNamespace(false)
+    }
+  }
+
+  const loadVectorStats = async () => {
+    try {
+      setIsLoadingVectors(true)
+      const response = await fetch(
+        `/api/vector-stats?namespace=${selectedNamespace}`
+      )
+      if (!response.ok) throw new Error('Failed to load vector statistics')
+      const stats = await response.json()
+
+      // If debug info is available, log it
+      if (stats.debug) {
+        console.log('Vector stats debug info:', stats.debug)
+      }
+
+      setVectorStats(stats)
+    } catch (error) {
+      console.error('Error loading vector statistics:', error)
+      setVectorStats({ totalVectors: 0, categories: {} })
+    } finally {
+      setIsLoadingVectors(false)
+    }
+  }
+
+  const handleClearVectorStore = async () => {
+    if (!selectedNamespace) return
+
+    try {
+      setIsClearingVectorStore(true)
+      const response = await fetch('/api/clear-vector-store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace: selectedNamespace }),
+      })
+
+      if (!response.ok) throw new Error('Failed to clear vector store')
+
+      // Reset vector stats before loading new ones
+      setVectorStats(null)
+      await loadVectorStats()
+
+      toast({
+        title: 'Success',
+        description: 'Vector store cleared successfully',
+        variant: 'default',
+      })
+    } catch (error) {
+      console.error('Error clearing vector store:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to clear vector store',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsClearingVectorStore(false)
+      setIsClearConfirmOpen(false)
+    }
+  }
 
   const convertToBase64 = async (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -267,6 +398,7 @@ export const UploadZip = () => {
           isTrainingMode: validationMode === 'training',
           prompt: folderPrompt,
           useGemini,
+          namespace: selectedNamespace,
         }),
       })
 
@@ -388,7 +520,11 @@ export const UploadZip = () => {
   const handleZipUpload = async (files: File[]) => {
     const file = files[0]
     if (!file || !file.name.endsWith('.zip')) {
-      alert('Please upload a zip file')
+      toast({
+        title: 'Error',
+        description: 'Please upload a zip file',
+        variant: 'destructive',
+      })
       return
     }
 
@@ -446,9 +582,18 @@ export const UploadZip = () => {
       })
 
       setFolderStructure(structure)
+      toast({
+        title: 'Success',
+        description: 'Zip file processed successfully',
+        variant: 'default',
+      })
     } catch (error) {
       console.error('Error processing zip file:', error)
-      alert('Error processing zip file')
+      toast({
+        title: 'Error',
+        description: 'Error processing zip file',
+        variant: 'destructive',
+      })
     } finally {
       setIsExtracting(false)
     }
@@ -520,9 +665,18 @@ export const UploadZip = () => {
       }
 
       setResults(allResults)
+
+      // Refresh vector stats if we were in training mode
+      if (validationMode === 'training') {
+        await loadVectorStats()
+      }
     } catch (error) {
       console.error('Error validating folders:', error)
-      alert('Error validating folders')
+      toast({
+        title: 'Error',
+        description: 'Error validating folders',
+        variant: 'destructive',
+      })
     } finally {
       setIsProcessing(false)
     }
@@ -821,6 +975,116 @@ export const UploadZip = () => {
             </p>
           </div>
         </div>
+
+        {/* Customer Namespace Selection */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+          <div className="space-y-2">
+            <Label className="text-white">Customer Namespace</Label>
+            <div className="flex gap-2">
+              <select
+                value={selectedNamespace}
+                onChange={(e) => setSelectedNamespace(e.target.value)}
+                className="flex-1 bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
+                disabled={isProcessing}
+              >
+                <option value="" className="bg-gray-800">
+                  Select a customer...
+                </option>
+                {availableNamespaces.map((ns) => (
+                  <option key={ns.id} value={ns.id} className="bg-gray-800">
+                    {ns.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-white">Add New Customer</Label>
+            <div className="flex gap-2">
+              <Input
+                value={newNamespaceName}
+                onChange={(e) => setNewNamespaceName(e.target.value)}
+                placeholder="Enter customer name"
+                className="flex-1 bg-white/5 border-white/10 text-white placeholder:text-white/40"
+                disabled={isAddingNamespace}
+              />
+              <Button
+                onClick={handleAddNamespace}
+                disabled={!newNamespaceName || isAddingNamespace}
+                className="bg-blue-500/80 hover:bg-blue-500/90 text-white"
+              >
+                {isAddingNamespace ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  'Add'
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mt-4">
+          {/* Vector Store Stats */}
+          {isLoadingVectors ? (
+            <div className="flex items-center gap-2 text-white/70">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Loading stats...
+            </div>
+          ) : (
+            vectorStats && (
+              <div className="text-right">
+                <p className="text-sm font-medium text-white">
+                  {vectorStats.totalVectors} vectors stored
+                </p>
+                <p className="text-xs text-white/70">
+                  {Object.keys(vectorStats.categories).length} categories
+                </p>
+              </div>
+            )
+          )}
+          <Button
+            onClick={() => setIsClearConfirmOpen(true)}
+            disabled={
+              isClearingVectorStore ||
+              !vectorStats?.totalVectors ||
+              !selectedNamespace
+            }
+            variant="outline"
+            className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/30"
+          >
+            {isClearingVectorStore ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Clearing...
+              </>
+            ) : (
+              'Clear Vector Store'
+            )}
+          </Button>
+        </div>
+
+        {/* Vector Store Details */}
+        {selectedNamespace && vectorStats && vectorStats.totalVectors > 0 && (
+          <div className="mt-4 p-4 bg-white/5 rounded-lg border border-white/10">
+            <h4 className="text-sm font-medium text-white mb-3">
+              Vector Store Contents
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {Object.entries(vectorStats.categories).map(
+                ([category, count]) => (
+                  <div key={category} className="p-3 bg-white/5 rounded-lg">
+                    <p className="text-sm font-medium text-white">{category}</p>
+                    <p className="text-xs text-white/70">{count} vectors</p>
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Mode Selection */}
@@ -1544,6 +1808,51 @@ export const UploadZip = () => {
               className="bg-green-600/80 hover:bg-green-600/90 text-white"
             >
               Export Report
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Clear Vector Store Confirmation Dialog */}
+      <Dialog open={isClearConfirmOpen} onOpenChange={setIsClearConfirmOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-gray-900/95 border border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-white">Clear Vector Store</DialogTitle>
+            <DialogDescription className="text-white/70">
+              This action will permanently delete all stored vectors. This
+              cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-4">
+              <p className="text-sm text-red-300">
+                You are about to delete {vectorStats?.totalVectors} vectors
+                across {Object.keys(vectorStats?.categories || {}).length}{' '}
+                categories.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsClearConfirmOpen(false)}
+              className="bg-white/5 hover:bg-white/10 text-white"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleClearVectorStore}
+              disabled={isClearingVectorStore}
+              className="bg-red-500/80 hover:bg-red-500/90 text-white"
+            >
+              {isClearingVectorStore ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Clearing...
+                </>
+              ) : (
+                'Yes, Clear All'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

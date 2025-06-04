@@ -8,6 +8,165 @@ if (typeof window === 'undefined') {
 
 import { validateImage } from '@/lib/services/validation'
 import { Category, State } from '@/types/validation'
+import { NextResponse } from 'next/server'
+
+async function processImageBuffer(base64Image: string): Promise<Buffer> {
+  try {
+    // More robust base64 data extraction
+    let base64Data = base64Image
+
+    // Handle data URL format with any image type
+    if (base64Image.startsWith('data:')) {
+      const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/)
+      if (!matches || matches.length !== 3) {
+        throw new Error('Invalid data URL format')
+      }
+      base64Data = matches[2]
+    }
+
+    // Validate base64 string
+    if (!base64Data.match(/^[A-Za-z0-9+/]+={0,2}$/)) {
+      throw new Error('Invalid base64 format')
+    }
+
+    // Convert to buffer
+    const buffer = Buffer.from(base64Data, 'base64')
+    if (buffer.length === 0) {
+      throw new Error('Empty image buffer')
+    }
+
+    // Try to determine format and process with Sharp
+    if (!Sharp) {
+      throw new Error('Sharp is not available on the client side')
+    }
+
+    const image = Sharp(buffer)
+    const metadata = await image.metadata()
+
+    if (!metadata.format) {
+      throw new Error('Unable to determine image format')
+    }
+
+    if (!metadata.width || !metadata.height) {
+      throw new Error('Invalid image dimensions')
+    }
+
+    console.log('Processing image:', {
+      format: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      size: buffer.length,
+    })
+
+    // Convert to standard format and validate
+    return await image
+      .toFormat('jpeg', {
+        quality: 90,
+        chromaSubsampling: '4:4:4', // Better quality for technical images
+      })
+      .toBuffer()
+  } catch (error) {
+    console.error('Error processing image buffer:', error)
+    const errorMessage =
+      error instanceof Error ? error.message : 'unknown error'
+    console.error('Full error details:', error)
+    throw new Error('Failed to process image: ' + errorMessage)
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const {
+      imageBase64,
+      folderPath,
+      useVectorStore = true,
+      isTrainingMode = false,
+      prompt,
+      useGemini = false,
+      namespace,
+    } = await request.json()
+
+    if (!imageBase64 || !folderPath) {
+      return new Response(
+        JSON.stringify({
+          error: 'Missing required fields: imageBase64 or folderPath',
+        }),
+        { status: 400 }
+      )
+    }
+
+    if (useVectorStore && !namespace) {
+      return new Response(
+        JSON.stringify({
+          error: 'Namespace is required when using vector store',
+        }),
+        { status: 400 }
+      )
+    }
+
+    // Log the presence of a prompt for debugging
+    console.log('Validation request:', {
+      folderPath,
+      hasPrompt: !!prompt,
+      promptLength: prompt?.length,
+      useVectorStore,
+      namespace,
+    })
+
+    // Process the image
+    const imageBuffer = await processImageBuffer(imageBase64)
+
+    // Get category and state from folder path
+    const category = normalizeCategoryName(folderPath)
+    const { state, measurement } = normalizeState(folderPath)
+
+    // Configure validation options
+    const validationOptions = {
+      useVectorStore,
+      isGroundTruth: isTrainingMode,
+      measurement,
+      prompt: prompt?.trim() || undefined,
+      useGemini,
+      namespace,
+    }
+
+    // Validate the image
+    const result = await validateImage(
+      imageBuffer,
+      category as Category,
+      state as State,
+      validationOptions
+    )
+
+    // Add mode information to response
+    const response = {
+      ...result,
+      mode: isTrainingMode ? 'training' : 'validation',
+      vectorStoreUsed: useVectorStore,
+      category,
+      expectedState: state,
+      measurement,
+      customPromptUsed: !!prompt,
+      promptSource: 'folder', // Indicate that this prompt came from a folder's prompt.txt
+    }
+
+    return new Response(JSON.stringify(response), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+  } catch (error) {
+    console.error('Error handling request:', error)
+    return new Response(
+      JSON.stringify({
+        error: 'Invalid request format',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      }),
+      { status: 400 }
+    )
+  }
+}
 
 function normalizeCategoryName(folderPath: string): string {
   const parts = folderPath.split('/')
@@ -105,176 +264,5 @@ function normalizeState(folderPath: string): {
   return {
     state: mappedState || state,
     measurement,
-  }
-}
-
-async function processImageBuffer(base64Image: string): Promise<Buffer> {
-  try {
-    // More robust base64 data extraction
-    let base64Data = base64Image
-
-    // Handle data URL format with any image type
-    if (base64Image.startsWith('data:')) {
-      const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/)
-      if (!matches || matches.length !== 3) {
-        throw new Error('Invalid data URL format')
-      }
-      base64Data = matches[2]
-    }
-
-    // Validate base64 string
-    if (!base64Data.match(/^[A-Za-z0-9+/]+={0,2}$/)) {
-      throw new Error('Invalid base64 format')
-    }
-
-    // Convert to buffer
-    const buffer = Buffer.from(base64Data, 'base64')
-    if (buffer.length === 0) {
-      throw new Error('Empty image buffer')
-    }
-
-    // Try to determine format and process with Sharp
-    if (!Sharp) {
-      throw new Error('Sharp is not available on the client side')
-    }
-
-    const image = Sharp(buffer)
-    const metadata = await image.metadata()
-
-    if (!metadata.format) {
-      throw new Error('Unable to determine image format')
-    }
-
-    if (!metadata.width || !metadata.height) {
-      throw new Error('Invalid image dimensions')
-    }
-
-    console.log('Processing image:', {
-      format: metadata.format,
-      width: metadata.width,
-      height: metadata.height,
-      size: buffer.length,
-    })
-
-    // Convert to standard format and validate
-    return await image
-      .toFormat('jpeg', {
-        quality: 90,
-        chromaSubsampling: '4:4:4', // Better quality for technical images
-      })
-      .toBuffer()
-  } catch (error) {
-    console.error('Error processing image buffer:', error)
-    const errorMessage =
-      error instanceof Error ? error.message : 'unknown error'
-    console.error('Full error details:', error)
-    throw new Error('Failed to process image: ' + errorMessage)
-  }
-}
-
-export async function POST(req: Request) {
-  try {
-    const {
-      imageBase64,
-      folderPath,
-      useVectorStore = true,
-      isTrainingMode = false,
-      prompt,
-      useGemini = false,
-    } = await req.json()
-
-    if (!imageBase64 || !folderPath) {
-      return new Response(
-        JSON.stringify({
-          error: 'Missing required fields: imageBase64 or folderPath',
-        }),
-        { status: 400 }
-      )
-    }
-
-    // Log the presence of a prompt for debugging
-    console.log('Validation request:', {
-      folderPath,
-      hasPrompt: !!prompt,
-      promptLength: prompt?.length,
-      useVectorStore,
-      isTrainingMode,
-      useGemini,
-    })
-
-    // Extract category and state from folder path
-    const category = normalizeCategoryName(folderPath)
-    const { state: expectedState, measurement } = normalizeState(folderPath)
-
-    try {
-      // Process and validate the image buffer
-      const imageBuffer = await processImageBuffer(imageBase64)
-
-      // Configure validation options based on mode
-      const validationOptions = {
-        useVectorStore,
-        isGroundTruth: isTrainingMode,
-        storeResults: isTrainingMode || useVectorStore,
-        measurement, // Pass the measurement to validation
-        prompt: prompt?.trim() || undefined, // Ensure prompt is trimmed and undefined if empty
-        useGemini, // Add useGemini to validation options
-      }
-
-      // Log validation configuration
-      console.log('Starting validation with options:', {
-        category,
-        expectedState,
-        measurement,
-        hasPrompt: !!validationOptions.prompt,
-        isTrainingMode,
-        useVectorStore,
-        useGemini,
-      })
-
-      // Validate the image using folder-based validation
-      const result = await validateImage(
-        imageBuffer,
-        category as Category,
-        expectedState as State,
-        validationOptions
-      )
-
-      // Add mode information to response
-      const response = {
-        ...result,
-        mode: isTrainingMode ? 'training' : 'validation',
-        vectorStoreUsed: useVectorStore,
-        category,
-        expectedState,
-        measurement,
-        customPromptUsed: !!validationOptions.prompt,
-        promptSource: 'folder', // Indicate that this prompt came from a folder's prompt.txt
-      }
-
-      return new Response(JSON.stringify(response), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-    } catch (error) {
-      console.error('Error processing image:', error)
-      return new Response(
-        JSON.stringify({
-          error: 'Failed to process or validate image',
-          details: error instanceof Error ? error.message : 'Unknown error',
-        }),
-        { status: 500 }
-      )
-    }
-  } catch (error) {
-    console.error('Error handling request:', error)
-    return new Response(
-      JSON.stringify({
-        error: 'Invalid request format',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      }),
-      { status: 400 }
-    )
   }
 }
