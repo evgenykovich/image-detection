@@ -234,13 +234,8 @@ export const UploadZip = () => {
 
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false)
   const [exportFileName, setExportFileName] = useState('validation-results')
-  const [isClearingVectorStore, setIsClearingVectorStore] = useState(false)
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false)
-  const [vectorStats, setVectorStats] = useState<{
-    totalVectors: number
-    categories: { [key: string]: number }
-  } | null>(null)
-  const [isLoadingVectors, setIsLoadingVectors] = useState(false)
+  const [isClearingVectorStore, setIsClearingVectorStore] = useState(false)
   const [selectedNamespace, setSelectedNamespace] = useState<string>('')
   const [availableNamespaces, setAvailableNamespaces] = useState<
     Array<{ id: string; name: string }>
@@ -252,13 +247,6 @@ export const UploadZip = () => {
   useEffect(() => {
     loadNamespaces()
   }, [])
-
-  // Load vector stats when namespace changes
-  useEffect(() => {
-    if (selectedNamespace) {
-      loadVectorStats()
-    }
-  }, [selectedNamespace])
 
   const loadNamespaces = async () => {
     try {
@@ -306,29 +294,6 @@ export const UploadZip = () => {
     }
   }
 
-  const loadVectorStats = async () => {
-    try {
-      setIsLoadingVectors(true)
-      const response = await fetch(
-        `/api/vector-stats?namespace=${selectedNamespace}`
-      )
-      if (!response.ok) throw new Error('Failed to load vector statistics')
-      const stats = await response.json()
-
-      // If debug info is available, log it
-      if (stats.debug) {
-        console.log('Vector stats debug info:', stats.debug)
-      }
-
-      setVectorStats(stats)
-    } catch (error) {
-      console.error('Error loading vector statistics:', error)
-      setVectorStats({ totalVectors: 0, categories: {} })
-    } finally {
-      setIsLoadingVectors(false)
-    }
-  }
-
   const handleClearVectorStore = async () => {
     if (!selectedNamespace) return
 
@@ -341,10 +306,6 @@ export const UploadZip = () => {
       })
 
       if (!response.ok) throw new Error('Failed to clear vector store')
-
-      // Reset vector stats before loading new ones
-      setVectorStats(null)
-      await loadVectorStats()
 
       toast({
         title: 'Success',
@@ -667,11 +628,6 @@ export const UploadZip = () => {
       }
 
       setResults(allResults)
-
-      // Refresh vector stats if we were in training mode
-      if (validationMode === 'training') {
-        await loadVectorStats()
-      }
     } catch (error) {
       console.error('Error validating folders:', error)
       toast({
@@ -1030,31 +986,10 @@ export const UploadZip = () => {
         </div>
 
         <div className="flex items-center justify-between mt-4">
-          {/* Vector Store Stats */}
-          {isLoadingVectors ? (
-            <div className="flex items-center gap-2 text-white/70">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading stats...
-            </div>
-          ) : (
-            vectorStats && (
-              <div className="text-right">
-                <p className="text-sm font-medium text-white">
-                  {vectorStats.totalVectors} vectors stored
-                </p>
-                <p className="text-xs text-white/70">
-                  {Object.keys(vectorStats.categories).length} categories
-                </p>
-              </div>
-            )
-          )}
+          <div></div>
           <Button
             onClick={() => setIsClearConfirmOpen(true)}
-            disabled={
-              isClearingVectorStore ||
-              !vectorStats?.totalVectors ||
-              !selectedNamespace
-            }
+            disabled={isClearingVectorStore || !selectedNamespace}
             variant="outline"
             className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/30"
           >
@@ -1068,25 +1003,6 @@ export const UploadZip = () => {
             )}
           </Button>
         </div>
-
-        {/* Vector Store Details */}
-        {selectedNamespace && vectorStats && vectorStats.totalVectors > 0 && (
-          <div className="mt-4 p-4 bg-white/5 rounded-lg border border-white/10">
-            <h4 className="text-sm font-medium text-white mb-3">
-              Vector Store Contents
-            </h4>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {Object.entries(vectorStats.categories).map(
-                ([category, count]) => (
-                  <div key={category} className="p-3 bg-white/5 rounded-lg">
-                    <p className="text-sm font-medium text-white">{category}</p>
-                    <p className="text-xs text-white/70">{count} vectors</p>
-                  </div>
-                )
-              )}
-            </div>
-          </div>
-        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Mode Selection */}
@@ -1873,9 +1789,7 @@ export const UploadZip = () => {
           <div className="py-4">
             <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-4">
               <p className="text-sm text-red-300">
-                You are about to delete {vectorStats?.totalVectors} vectors
-                across {Object.keys(vectorStats?.categories || {}).length}{' '}
-                categories.
+                Are you sure you want to clear all vectors from the store?
               </p>
             </div>
           </div>
