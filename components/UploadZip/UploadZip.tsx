@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { aiInUse } from '@/store'
+import Image from 'next/image'
 import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import { DropZoneUpload } from '../DropZoneUpload'
@@ -1020,7 +1020,7 @@ export const UploadZip = () => {
                 Validation Mode
               </option>
               <option value="training" className="text-black">
-                Training Mode
+                Tuning Mode
               </option>
             </select>
             <p className="text-xs text-white/60">
@@ -1429,6 +1429,46 @@ export const UploadZip = () => {
                                     </ul>
                                   </div>
                                 )}
+
+                              {/* Image Display */}
+                              <div className="bg-white/5 rounded-lg p-4 space-y-3">
+                                <h3 className="text-lg font-semibold text-white">
+                                  Image
+                                </h3>
+                                <div className="relative w-full h-[500px]">
+                                  <div className="absolute inset-0 bg-white/5 animate-pulse rounded-lg" />
+                                  <Image
+                                    src={(() => {
+                                      const imageData = folderStructure[
+                                        result.path
+                                      ].images.find(
+                                        (img) => img.name === result.filename
+                                      )?.data
+                                      return imageData
+                                        ? URL.createObjectURL(imageData as Blob)
+                                        : '/placeholder.png'
+                                    })()}
+                                    alt={result.filename}
+                                    fill
+                                    priority
+                                    className="object-contain rounded-lg"
+                                    sizes="100vw"
+                                    unoptimized
+                                    onLoad={(e) => {
+                                      if (
+                                        e.currentTarget.src.startsWith('blob:')
+                                      ) {
+                                        URL.revokeObjectURL(e.currentTarget.src)
+                                      }
+                                      // Hide the loading state
+                                      const loadingEl = e.currentTarget
+                                        .previousSibling as HTMLElement
+                                      if (loadingEl)
+                                        loadingEl.style.display = 'none'
+                                    }}
+                                  />
+                                </div>
+                              </div>
                             </div>
 
                             <div className="space-y-4">
