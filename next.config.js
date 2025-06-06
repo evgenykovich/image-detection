@@ -11,6 +11,10 @@ const nextConfig = {
     }
     return config
   },
+  images: {
+    dangerouslyAllowSVG: true,
+    contentDispositionType: 'attachment',
+  },
 }
 
 module.exports = nextConfig
