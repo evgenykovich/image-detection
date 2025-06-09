@@ -522,7 +522,6 @@ export const UploadZip = () => {
       const contents = await zip.loadAsync(file)
       const structure: FolderStructure = {}
 
-      // First pass: Create folder structure and process images
       for (const [path, zipEntry] of Object.entries(contents.files)) {
         if (!zipEntry.dir) {
           const folderPath = path.split('/').slice(0, -1).join('/')
