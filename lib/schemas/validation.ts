@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { State } from '@/types/validation'
 
 // Base validation criteria for all categories
 export const BaseValidationSchema = z.object({
@@ -62,40 +63,120 @@ export function buildSchemaForCategory(category: string) {
 // Helper function to build model prompts based on category and state
 export function buildPromptFromCategory(
   category: string,
-  expectedState: string,
-  prompt?: string
-) {
-  // If custom prompt is provided, use it with folder context
-  if (prompt) {
-    return `${prompt}
+  expectedState: State,
+  customPrompt?: string,
+  folderDescription?: string
+): string {
+  // Start with the folder description if available
+  let contextPrompt = folderDescription
+    ? `Context: ${folderDescription}\n\n`
+    : ''
 
-Note: This image is from a folder labeled "${expectedState}".
-Please analyze the image based on the prompt above, while considering this folder context.
-
-Respond with a detailed assessment following the exact schema provided.`
+  // Add the custom prompt if provided
+  if (customPrompt) {
+    return `${contextPrompt}${customPrompt}`
   }
 
-  // Default folder-based prompt if no custom prompt provided
-  return `Please analyze this image for ${category} validation.
-This image is from a folder labeled "${expectedState}", indicating it should be in ${expectedState} state.
+  // Build default prompt based on category and state
+  let basePrompt = ''
+  switch (category.toLowerCase()) {
+    case 'corrosion':
+      basePrompt = `${contextPrompt}Analyze this image for signs of corrosion. The expected state is ${expectedState}.
+Focus on:
+1. Surface condition and color changes
+2. Presence of rust, oxidation, or discoloration
+3. Material degradation or pitting
+4. Surface texture abnormalities
+5. Extent and severity of any corrosion
+6. Impact on component functionality
+7. Comparison with acceptable corrosion limits`
+      break
 
-Key validation task:
-1. Verify if the actual state matches the expected "${expectedState}" state
-- Is the component actually in ${expectedState} state as the folder suggests?
-- If not, what is its actual state?
-- Document any discrepancy between folder classification and actual state
+    case 'threads':
+      basePrompt = `${contextPrompt}Examine this image and determine if threads are ${expectedState}.
+Focus on:
+1. Thread visibility and presence
+2. Thread pattern and consistency
+3. Thread pitch and spacing
+4. Thread damage or wear
+5. Thread depth and clarity
+6. Thread engagement area
+7. Signs of cross-threading or stripping`
+      break
 
-2. Physical State Assessment
-- Document specific observations about physical condition
-- Note any defects or issues
-- Identify any misalignment with expected state
+    case 'connector_plates':
+      basePrompt = `${contextPrompt}Analyze this connector plate image and determine if it is ${expectedState}.
+Focus on:
+1. Overall plate alignment and orientation
+2. Any visible bends, warps, or deformations
+3. Angles and straightness of edges
+4. Signs of physical damage or stress
+5. Proper mounting position and alignment
+6. Surface condition and integrity
+7. Connection point alignment`
+      break
 
-3. Overall Assessment
-- Determine if this is valid for the ${expectedState} state folder
-- If invalid, explain why it doesn't belong in this folder
-- Suggest correct classification if applicable
+    case 'cotter_pins':
+      basePrompt = `${contextPrompt}Examine this image and verify if the cotter pin is ${expectedState}.
+Focus on:
+1. Pin presence and visibility
+2. Proper installation orientation
+3. Pin spread/bend condition
+4. Pin engagement through hole
+5. Pin size appropriateness
+6. Signs of wear or damage
+7. Security of installation`
+      break
 
-Respond with a detailed assessment following the exact schema provided.`
+    case 'spacer_plates':
+      basePrompt = `${contextPrompt}Analyze this image to verify if the spacer plate is ${expectedState}.
+Focus on:
+1. Plate presence and position
+2. Proper spacing maintained
+3. Plate orientation
+4. Surface condition
+5. Any signs of movement
+6. Proper fitment
+7. Signs of wear or damage`
+      break
+
+    case 'positive_connection':
+      basePrompt = `${contextPrompt}Examine this image to verify if there is a ${expectedState} positive connection.
+Focus on:
+1. Connection integrity
+2. Component engagement
+3. Proper alignment
+4. Security of fasteners
+5. No gaps or looseness
+6. Proper seating
+7. Signs of movement or separation`
+      break
+
+    case 'cable_diameter':
+      basePrompt = `${contextPrompt}Analyze this image to determine if the cable diameter is ${expectedState}.
+Focus on:
+1. Cable diameter measurement
+2. Consistent diameter along length
+3. Signs of wear or reduction
+4. Comparison to required specifications
+5. Measurement accuracy
+6. Cable roundness
+7. Surface condition impact on diameter`
+      break
+
+    default:
+      basePrompt = `${contextPrompt}Analyze this image and determine if the ${category} is ${expectedState}.
+Focus on:
+1. Overall condition
+2. Presence or absence of the component
+3. Any visible damage or wear
+4. Proper positioning and alignment
+5. Compliance with expected state
+6. Component integrity
+7. Functional impact`
+  }
+
+  return basePrompt
 }
 
 // Type for validation results

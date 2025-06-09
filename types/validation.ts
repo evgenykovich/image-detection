@@ -1,8 +1,18 @@
 import { z } from 'zod'
 
 // Basic types for validation
-export type Category = string
+export type Category =
+  | 'corrosion'
+  | 'threads'
+  | 'connector_plates'
+  | 'cotter_pins'
+  | 'spacer_plates'
+  | 'positive_connection'
+  | 'cable_diameter'
+
 export type State = string
+export type ValidationImportance = 'critical' | 'high' | 'medium' | 'low'
+export type ValidationType = 'measurement' | 'visual' | 'safety' | 'compliance'
 
 export interface ImageFeatures {
   visualFeatures: number[]
@@ -21,42 +31,71 @@ export interface ImageFeatures {
 
 export interface SimilarCase {
   imageUrl: string
-  category: Category
-  state: State
-  features: ImageFeatures
-  diagnosis: string
+  category: string
+  state: string
   confidence: number
   keyFeatures: string[]
+  diagnosis?: ValidationDiagnosis
+}
+
+export interface ValidationDiagnosis {
+  overall_assessment: string
+  confidence_level: number
+  key_observations: string[]
+  matched_criteria: string[]
+  failed_criteria: string[]
+  detailed_explanation: string
+}
+
+export interface PhysicalState {
+  matches_expected: boolean
+  has_defects: boolean
+  condition_details: string[]
+}
+
+export interface Measurements {
+  meets_requirements: boolean
+  measurement_details: string[]
+}
+
+export interface Characteristics {
+  physical_state: PhysicalState
+  measurements?: Measurements
 }
 
 export interface ValidationResult {
   isValid: boolean
   confidence: number
-  diagnosis: {
-    overall_assessment: string
-    confidence_level: number
-    key_observations: string[]
-    matched_criteria: string[]
-    failed_criteria: string[]
-    detailed_explanation: string
-  }
+  diagnosis: ValidationDiagnosis
   matchedCriteria: string[]
   failedCriteria: string[]
-  similarCases: SimilarCase[]
+  similarCases?: SimilarCase[]
   explanation: string
-  features: ImageFeatures
-  modelUsed?: string
-  characteristics?: {
-    physical_state?: {
-      matches_expected: boolean
-      has_defects: boolean
-      condition_details: string[]
+  features?: {
+    structuralFeatures: {
+      edges: number
+      contrast: number
+      brightness: number
+      sharpness: number
     }
-    measurements?: {
-      meets_requirements: boolean
-      measurement_details: string[]
+    metadata: {
+      dimensions: {
+        width: number
+        height: number
+      }
+      format: string
+      size: number
     }
+    visualFeatures?: number[]
   }
+  result?: string
+  category?: string
+  expectedState?: string
+  mode?: 'training' | 'validation'
+  vectorStoreUsed?: boolean
+  measurement?: string
+  modelUsed?: string
+  characteristics?: Characteristics
 }
 
 export interface ValidationResponse {
