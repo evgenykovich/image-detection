@@ -1,7 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { useAtomValue } from 'jotai'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -26,7 +25,7 @@ import Image from 'next/image'
 import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import { DropZoneUpload } from '../DropZoneUpload'
-import { Download, Folder, ChevronDown, Loader2 } from 'lucide-react'
+import { Download, Folder, ChevronDown, Loader2, Check } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 
 interface ValidationResponse {
@@ -186,11 +185,20 @@ interface ValidationResult {
   vectorStoreUsed?: boolean
 }
 
+interface SuggestedPrompt {
+  text: string
+  category?: string
+  confidence?: number
+  selected?: boolean
+}
+
 interface FolderStructure {
   [key: string]: {
     images: { name: string; data: Blob }[]
     subfolders: string[]
     prompt: string
+    description: string
+    suggestedPrompts?: SuggestedPrompt[]
   }
 }
 
@@ -243,12 +251,13 @@ export const UploadZip = () => {
   const [isAddingNamespace, setIsAddingNamespace] = useState(false)
   const [newNamespaceName, setNewNamespaceName] = useState('')
 
-  // Load namespaces on component mount
-  useEffect(() => {
-    loadNamespaces()
-  }, [])
+  // Add these state variables at the top with other state declarations
+  const [isSuggestingPrompt, setIsSuggestingPrompt] = useState(false)
+  const [suggestedPrompts, setSuggestedPrompts] = useState<SuggestedPrompt[]>(
+    []
+  )
 
-  const loadNamespaces = async () => {
+  const loadNamespaces = useCallback(async () => {
     try {
       const response = await fetch('/api/namespaces')
       if (!response.ok) throw new Error('Failed to load namespaces')
@@ -262,7 +271,12 @@ export const UploadZip = () => {
     } catch (error) {
       console.error('Error loading namespaces:', error)
     }
-  }
+  }, [selectedNamespace])
+
+  // Load namespaces on component mount
+  useEffect(() => {
+    loadNamespaces()
+  }, [loadNamespaces])
 
   const handleAddNamespace = async () => {
     try {
@@ -342,6 +356,7 @@ export const UploadZip = () => {
     try {
       const base64Image = await convertToBase64(imageBlob)
       const folderPrompt = folderStructure[path]?.prompt || ''
+      const folderDescription = folderStructure[path]?.description || ''
 
       console.log(
         'Sending validation request with model:',
@@ -359,6 +374,7 @@ export const UploadZip = () => {
           useVectorStore,
           isTrainingMode: validationMode === 'training',
           prompt: folderPrompt,
+          description: folderDescription,
           useGemini,
           namespace: selectedNamespace,
         }),
@@ -505,7 +521,6 @@ export const UploadZip = () => {
       const contents = await zip.loadAsync(file)
       const structure: FolderStructure = {}
 
-      // First pass: Create folder structure and process images
       for (const [path, zipEntry] of Object.entries(contents.files)) {
         if (!zipEntry.dir) {
           const folderPath = path.split('/').slice(0, -1).join('/')
@@ -513,7 +528,12 @@ export const UploadZip = () => {
 
           // Initialize folder if it doesn't exist
           if (!structure[folderPath]) {
-            structure[folderPath] = { images: [], subfolders: [], prompt: '' }
+            structure[folderPath] = {
+              images: [],
+              subfolders: [],
+              prompt: '',
+              description: '',
+            }
           }
 
           // Process images
@@ -891,6 +911,172 @@ export const UploadZip = () => {
     }
   }
 
+  const handleSuggestPrompt = async () => {
+    if (!currentEditingFolder || !folderStructure?.[currentEditingFolder])
+      return
+
+    setIsSuggestingPrompt(true)
+    try {
+      const folder = folderStructure[currentEditingFolder]
+      if (!folder?.images?.length) {
+        toast({
+          title: 'No images found',
+          description:
+            'The folder must contain at least one image to suggest a prompt.',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      // Get the first image as a sample
+      const sampleImage = folder.images[0]
+      const base64Image = await convertToBase64(sampleImage.data)
+
+      // Send request to suggest prompt
+      const response = await fetch('/api/suggest-prompt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          imageBase64: base64Image,
+          folderPath: currentEditingFolder,
+          description: folder.description,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to suggest prompt')
+      }
+
+      const { suggestedPrompt } = await response.json()
+
+      const calculateConfidence = (prompt: string): number => {
+        let confidence = 0.5 // Base confidence
+
+        // Increase confidence based on specific characteristics
+        if (
+          prompt.includes('measure') ||
+          prompt.includes('dimensions') ||
+          prompt.includes('mm') ||
+          prompt.includes('tolerance')
+        ) {
+          confidence += 0.2 // More confident in measurable criteria
+        }
+
+        if (
+          prompt.includes('verify') ||
+          prompt.includes('ensure') ||
+          prompt.includes('check') ||
+          prompt.includes('inspect')
+        ) {
+          confidence += 0.15 // Confident in verification tasks
+        }
+
+        if (
+          prompt.includes('defect') ||
+          prompt.includes('damage') ||
+          prompt.includes('crack') ||
+          prompt.includes('imperfection')
+        ) {
+          confidence += 0.1 // Decent confidence in defect detection
+        }
+
+        // Adjust confidence based on prompt specificity
+        if (prompt.match(/\d+(\.\d+)?\s*(mm|cm|m|inch)/)) {
+          confidence += 0.1 // Higher confidence when specific measurements are included
+        }
+
+        // Cap confidence at 0.95
+        return Math.min(0.95, confidence)
+      }
+
+      // Split the response into individual prompts
+      const prompts = suggestedPrompt
+        .split('\n')
+        .filter((line: string) => line.trim())
+        .map((line: string) => line.trim())
+        .filter((line: string) => {
+          // Filter out lines that are likely headers or footers
+          const isHeader =
+            line.toLowerCase().includes('validation prompt') ||
+            line.endsWith(':') ||
+            line.startsWith('Please ensure')
+          return !isHeader
+        })
+        .map((line: string) => {
+          // Remove numbering if present
+          const cleanLine = line.replace(/^\d+\.\s*/, '').trim()
+          const pathParts = currentEditingFolder?.split('/') || []
+          return {
+            text: cleanLine,
+            category: pathParts[1] || '',
+            confidence: calculateConfidence(cleanLine.toLowerCase()),
+            selected: false,
+          }
+        })
+        .filter((prompt: SuggestedPrompt) => prompt.text.length > 0)
+
+      setFolderStructure((prev) => {
+        const currentFolder = prev[currentEditingFolder]
+        if (!currentFolder) return prev
+
+        return {
+          ...prev,
+          [currentEditingFolder]: {
+            ...currentFolder,
+            suggestedPrompts: [
+              ...(currentFolder.suggestedPrompts || []),
+              ...prompts,
+            ],
+          },
+        }
+      })
+
+      toast({
+        title: 'Prompts Suggested',
+        description: `Generated ${prompts.length} validation prompts based on your folder description and sample image.`,
+        variant: 'default',
+      })
+    } catch (error) {
+      console.error('Error suggesting prompt:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to suggest prompt. Please try again.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSuggestingPrompt(false)
+    }
+  }
+
+  const handlePromptSelect = (folderPath: string, promptIndex: number) => {
+    setFolderStructure((prev) => {
+      const folder = prev[folderPath]
+      if (!folder?.suggestedPrompts) return prev
+
+      const updatedPrompts = folder.suggestedPrompts.map((p, idx) => ({
+        ...p,
+        selected: idx === promptIndex ? !p.selected : p.selected, // Toggle selection
+      }))
+
+      // Combine selected prompts into a single prompt string
+      const selectedPrompts = updatedPrompts
+        .filter((p) => p.selected)
+        .map((p) => p.text)
+        .join('\n\n')
+
+      return {
+        ...prev,
+        [folderPath]: {
+          ...folder,
+          prompt: selectedPrompts,
+          suggestedPrompts: updatedPrompts,
+        },
+      }
+    })
+  }
+
   return (
     <div className="w-full max-w-4xl space-y-6">
       <div className="flex items-center justify-between p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg">
@@ -1203,7 +1389,10 @@ export const UploadZip = () => {
             <ScrollArea className="h-[300px] rounded-md border border-white/10 bg-white/5">
               <div className="space-y-4 p-4">
                 {Object.entries(folderStructure).map(
-                  ([folderPath, { images, subfolders, prompt }]) => (
+                  ([
+                    folderPath,
+                    { images, subfolders, prompt, description },
+                  ]) => (
                     <div
                       key={folderPath}
                       className="flex items-start space-x-4 p-2 rounded-lg hover:bg-white/5 transition-colors"
@@ -1235,6 +1424,11 @@ export const UploadZip = () => {
                             </span>
                           )}
                         </p>
+                        {description && (
+                          <p className="text-sm text-white/60 mt-1">
+                            {description}
+                          </p>
+                        )}
                       </div>
                       <Button
                         variant="outline"
@@ -1581,6 +1775,23 @@ export const UploadZip = () => {
                                     </p>
                                   </div>
                                 )}
+
+                                {/* Validation Prompt Used */}
+                                {folderStructure[result.path]?.prompt && (
+                                  <div className="bg-blue-500/10 rounded-lg p-4 space-y-3 border border-blue-500/20">
+                                    <div className="flex items-center justify-between">
+                                      <h3 className="text-lg font-semibold text-white">
+                                        Validation Prompt
+                                      </h3>
+                                      <span className="text-xs px-2 py-1 rounded-full bg-blue-500/20 text-blue-300">
+                                        Used for validation
+                                      </span>
+                                    </div>
+                                    <p className="text-white/70 text-sm whitespace-pre-wrap font-mono">
+                                      {folderStructure[result.path].prompt}
+                                    </p>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Image Features */}
@@ -1722,28 +1933,74 @@ export const UploadZip = () => {
           }
         }}
       >
-        <DialogContent className="sm:max-w-[600px] bg-gray-900/95 border border-white/10 text-white">
+        <DialogContent className="sm:max-w-[800px] bg-gray-900/95 border border-white/10 text-white">
           <DialogHeader>
             <DialogTitle className="text-white">
               {foldersNeedingPrompts.length > 0
                 ? `Folder Requires Prompt (${foldersNeedingPrompts.length} remaining)`
                 : folderStructure[currentEditingFolder || '']?.prompt
-                ? 'Edit Folder Prompt'
-                : 'Add Folder Prompt'}
+                ? 'Edit Folder Settings'
+                : 'Add Folder Settings'}
             </DialogTitle>
             <DialogDescription className="text-white/70">
               {foldersNeedingPrompts.length > 0
-                ? `Please provide a validation prompt for folder: ${currentEditingFolder}`
+                ? `Please provide validation settings for folder: ${currentEditingFolder}`
                 : currentEditingFolder
-                ? `Edit the validation prompt for folder: ${currentEditingFolder}`
-                : 'Add a validation prompt for this folder'}
+                ? `Edit the validation settings for folder: ${currentEditingFolder}`
+                : 'Add validation settings for this folder'}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="prompt" className="text-white/90">
-                Prompt
+              <Label htmlFor="description" className="text-white/90">
+                Folder Description
               </Label>
+              <textarea
+                id="description"
+                value={
+                  folderStructure[currentEditingFolder || '']?.description || ''
+                }
+                onChange={(e) => {
+                  if (currentEditingFolder) {
+                    setFolderStructure((prev) => ({
+                      ...prev,
+                      [currentEditingFolder]: {
+                        ...prev[currentEditingFolder],
+                        description: e.target.value,
+                      },
+                    }))
+                  }
+                }}
+                className="min-h-[100px] w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white placeholder:text-white/40"
+                placeholder="Describe what images this folder contains (e.g., 'This folder contains straight connector plates of type X manufactured by Y...')"
+              />
+            </div>
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="prompt" className="text-white/90">
+                  Validation Prompt
+                </Label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSuggestPrompt}
+                  disabled={
+                    !currentEditingFolder ||
+                    !folderStructure[currentEditingFolder]?.description ||
+                    isSuggestingPrompt
+                  }
+                  className="bg-white/5 hover:bg-white/10 text-white"
+                >
+                  {isSuggestingPrompt ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Suggesting...
+                    </>
+                  ) : (
+                    'Suggest Prompt'
+                  )}
+                </Button>
+              </div>
               <textarea
                 id="prompt"
                 value={
@@ -1760,10 +2017,70 @@ export const UploadZip = () => {
                     }))
                   }
                 }}
-                className="min-h-[200px] w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white placeholder:text-white/40"
-                placeholder="Enter your validation prompt here..."
+                className="min-h-[150px] w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white placeholder:text-white/40"
+                placeholder="Enter your validation prompt here (e.g., 'Are the connector plates straight? Check for any bends or deformations...')"
               />
             </div>
+
+            {/* Suggested Prompts Section */}
+            {currentEditingFolder &&
+              folderStructure?.[currentEditingFolder]?.suggestedPrompts &&
+              folderStructure?.[currentEditingFolder]?.suggestedPrompts.length >
+                0 && (
+                <div className="mt-4">
+                  <Label className="text-white/90 mb-2">
+                    Suggested Prompts
+                  </Label>
+                  <ScrollArea className="h-[200px] w-full rounded-md border border-white/10">
+                    <div className="p-4 space-y-2">
+                      {folderStructure?.[
+                        currentEditingFolder
+                      ]?.suggestedPrompts?.map((prompt, index) => (
+                        <div
+                          key={index}
+                          className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                            prompt.selected
+                              ? 'bg-blue-500/20 border border-blue-500/40'
+                              : 'bg-white/5 border border-white/10 hover:bg-white/10'
+                          }`}
+                          onClick={() =>
+                            handlePromptSelect(currentEditingFolder, index)
+                          }
+                        >
+                          <div className="flex items-start gap-2">
+                            <div
+                              className={`mt-1 p-0.5 rounded-full ${
+                                prompt.selected ? 'bg-blue-500' : 'bg-white/20'
+                              }`}
+                            >
+                              <Check className="w-3 h-3" />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm text-white/90">
+                                {prompt.text}
+                              </p>
+                              <div className="flex items-center gap-2 mt-2">
+                                <span className="text-xs text-white/60">
+                                  Confidence:{' '}
+                                  {((prompt.confidence ?? 0.5) * 100).toFixed(
+                                    1
+                                  )}
+                                  %
+                                </span>
+                                {prompt.category && (
+                                  <span className="text-xs px-2 py-1 rounded-full bg-white/10 text-white/60">
+                                    {prompt.category}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </div>
+              )}
           </div>
           <DialogFooter>
             <Button

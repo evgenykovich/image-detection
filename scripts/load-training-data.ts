@@ -35,11 +35,11 @@ const STATE_MAPPING: Record<string, State> = {
 const CATEGORY_MAPPING: Record<string, Category> = {
   Corrosion: 'corrosion',
   Threads: 'threads',
-  Connector: 'connector',
-  'Cotter Pin': 'cotter_pin',
-  Spacer: 'spacer',
-  Connection: 'connection',
-  Cable: 'cable',
+  Connector: 'connector_plates',
+  'Cotter Pin': 'cotter_pins',
+  Spacer: 'spacer_plates',
+  Connection: 'positive_connection',
+  Cable: 'cable_diameter',
 }
 
 async function processGroundTruthImage(

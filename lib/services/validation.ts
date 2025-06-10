@@ -1,7 +1,13 @@
 import { ChatOpenAI } from 'langchain/chat_models/openai'
 import { HumanMessage } from 'langchain/schema'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { ValidationResult, Category, State } from '@/types/validation'
+import {
+  ValidationResult,
+  Category,
+  State,
+  ValidationDiagnosis,
+  Characteristics,
+} from '@/types/validation'
 import { extractImageFeatures } from './featureExtraction'
 import { findSimilarCases, storeValidationCase } from './vectorStorage'
 import {
@@ -26,12 +32,13 @@ interface ValidationOptions {
   isGroundTruth?: boolean
   measurement?: string
   prompt?: string
+  description?: string
   useGemini?: boolean
   namespace?: string
 }
 
 async function getModelResponse(
-  category: string,
+  category: Category,
   expectedState: State,
   imageBuffer: Buffer,
   useGemini: boolean = false,
@@ -45,11 +52,14 @@ async function getModelResponse(
     const basePrompt = buildPromptFromCategory(
       category,
       expectedState,
-      options?.prompt
+      options?.prompt,
+      options?.description
     )
 
     const jsonInstructions = `
 You are a computer vision expert analyzing images. Your task is to provide a detailed analysis in JSON format.
+
+Context: ${options?.description || `Analyzing ${category} images`}
 
 Your response must be a valid JSON object with this exact structure:
 {
@@ -154,7 +164,7 @@ ${basePrompt}`
 
 export async function validateImage(
   imageBuffer: Buffer,
-  category: string,
+  category: Category,
   expectedState: State,
   options: ValidationOptions = {
     useVectorStore: true,
@@ -169,32 +179,34 @@ export async function validateImage(
     const features = await extractImageFeatures(imageBuffer)
 
     if (options.isGroundTruth) {
+      const groundTruthDiagnosis: ValidationDiagnosis = {
+        overall_assessment: 'Valid',
+        confidence_level: 1.0,
+        key_observations: [`Ground truth ${expectedState} ${category} example`],
+        matched_criteria: [`Meets ${expectedState} criteria for ${category}`],
+        failed_criteria: [],
+        detailed_explanation: `This is a reference image provided by the client showing a valid ${expectedState} ${category}.`,
+      }
+
+      const groundTruthCharacteristics: Characteristics = {
+        physical_state: {
+          matches_expected: true,
+          has_defects: false,
+          condition_details: [`Valid ${expectedState} state`],
+        },
+      }
+
       const groundTruthResult: ValidationResult = {
         isValid: true,
         confidence: 1.0,
-        diagnosis: {
-          overall_assessment: 'Valid',
-          confidence_level: 1.0,
-          key_observations: [
-            `Ground truth ${expectedState} ${category} example`,
-          ],
-          matched_criteria: [`Meets ${expectedState} criteria for ${category}`],
-          failed_criteria: [],
-          detailed_explanation: `This is a reference image provided by the client showing a valid ${expectedState} ${category}.`,
-        },
+        diagnosis: groundTruthDiagnosis,
         matchedCriteria: [`Reference image for ${expectedState} ${category}`],
         failedCriteria: [],
         similarCases: [],
         explanation: `Ground truth example of ${expectedState} ${category}`,
         features,
         modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
-        characteristics: {
-          physical_state: {
-            matches_expected: true,
-            has_defects: false,
-            condition_details: [`Valid ${expectedState} state`],
-          },
-        },
+        characteristics: groundTruthCharacteristics,
       }
 
       try {
@@ -203,7 +215,7 @@ export async function validateImage(
           category,
           expectedState,
           features,
-          groundTruthResult.diagnosis.detailed_explanation,
+          groundTruthDiagnosis.detailed_explanation,
           groundTruthResult.matchedCriteria,
           1.0,
           options.prompt,
@@ -228,11 +240,11 @@ export async function validateImage(
     // Build the validation result
     const result: ValidationResult = {
       isValid: options?.prompt
-        ? modelResponse.is_valid // For custom prompts, use the direct response
+        ? modelResponse.is_valid
         : modelResponse.characteristics?.physical_state?.matches_expected ===
           false
-        ? modelResponse.is_valid // For straight validation, true means it's straight
-        : !modelResponse.is_valid, // Invert the validation for bent validation
+        ? modelResponse.is_valid
+        : !modelResponse.is_valid,
       confidence: modelResponse.confidence,
       diagnosis: {
         ...modelResponse.diagnosis,
@@ -242,13 +254,13 @@ export async function validateImage(
             : 'Invalid'
           : modelResponse.characteristics?.physical_state?.matches_expected ===
             false
-          ? 'Valid' // If it's straight when we expect bent, it's valid for straight check
-          : 'Invalid', // If it's bent when we expect straight, it's invalid for straight check
+          ? 'Valid'
+          : 'Invalid',
         key_observations: [
           ...modelResponse.diagnosis.key_observations,
-          modelResponse.characteristics?.physical_state?.condition_details ||
-            [],
-        ].flat(),
+          ...(modelResponse.characteristics?.physical_state
+            ?.condition_details || []),
+        ],
       },
       matchedCriteria: modelResponse.diagnosis.matched_criteria,
       failedCriteria: modelResponse.diagnosis.failed_criteria,
@@ -260,7 +272,21 @@ export async function validateImage(
           : 'Connector plate is bent'),
       features,
       modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
-      characteristics: modelResponse.characteristics,
+      characteristics: {
+        physical_state: {
+          matches_expected:
+            modelResponse.characteristics?.physical_state?.matches_expected ||
+            false,
+          has_defects:
+            modelResponse.characteristics?.physical_state?.has_defects || false,
+          condition_details:
+            modelResponse.characteristics?.physical_state?.condition_details ||
+            [],
+        },
+        ...(modelResponse.characteristics?.measurements && {
+          measurements: modelResponse.characteristics.measurements,
+        }),
+      },
     }
 
     // If vector store is enabled, find and use similar cases
@@ -309,11 +335,16 @@ export async function validateImage(
 
           // Add reference match information to observations
           const mostSimilar = highConfidenceCases[0]
-          result.diagnosis.key_observations.push(
-            `Matches reference image with ${(
-              mostSimilar.confidence * 100
-            ).toFixed(1)}% confidence`
-          )
+          if (
+            result.diagnosis &&
+            Array.isArray(result.diagnosis.key_observations)
+          ) {
+            result.diagnosis.key_observations.push(
+              `Matches reference image with ${(
+                mostSimilar.confidence * 100
+              ).toFixed(1)}% confidence`
+            )
+          }
         } else {
           console.log('No high confidence matches found')
         }
@@ -327,31 +358,35 @@ export async function validateImage(
     return result
   } catch (error) {
     console.error('Validation error:', error)
+    const errorDiagnosis: ValidationDiagnosis = {
+      overall_assessment: 'Invalid',
+      confidence_level: 0,
+      key_observations: [],
+      matched_criteria: [],
+      failed_criteria: ['Validation error occurred'],
+      detailed_explanation:
+        error instanceof Error ? error.message : 'Unknown error',
+    }
+
+    const errorCharacteristics: Characteristics = {
+      physical_state: {
+        matches_expected: false,
+        has_defects: true,
+        condition_details: ['Validation error occurred'],
+      },
+    }
+
     return {
       isValid: false,
       confidence: 0,
-      diagnosis: {
-        overall_assessment: 'Invalid',
-        confidence_level: 0,
-        key_observations: [],
-        matched_criteria: [],
-        failed_criteria: ['Validation error occurred'],
-        detailed_explanation:
-          error instanceof Error ? error.message : 'Unknown error',
-      },
+      diagnosis: errorDiagnosis,
       matchedCriteria: [],
       failedCriteria: ['Validation error occurred'],
       similarCases: [],
       explanation: 'Validation failed',
       features: await extractImageFeatures(imageBuffer),
       modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
-      characteristics: {
-        physical_state: {
-          matches_expected: false,
-          has_defects: true,
-          condition_details: ['Validation error occurred'],
-        },
-      },
+      characteristics: errorCharacteristics,
     }
   }
 }

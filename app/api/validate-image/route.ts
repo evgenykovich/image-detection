@@ -10,7 +10,7 @@ import { validateImage } from '@/lib/services/validation'
 import { Category, State } from '@/types/validation'
 import { NextResponse } from 'next/server'
 
-async function processImageBuffer(base64Image: string): Promise<Buffer> {
+export async function processImageBuffer(base64Image: string): Promise<Buffer> {
   try {
     // More robust base64 data extraction
     let base64Data = base64Image
@@ -82,6 +82,7 @@ export async function POST(request: Request) {
       useVectorStore = true,
       isTrainingMode = false,
       prompt,
+      description,
       useGemini = false,
       namespace,
     } = await request.json()
@@ -104,11 +105,13 @@ export async function POST(request: Request) {
       )
     }
 
-    // Log the presence of a prompt for debugging
+    // Log the presence of a prompt and description for debugging
     console.log('Validation request:', {
       folderPath,
       hasPrompt: !!prompt,
+      hasDescription: !!description,
       promptLength: prompt?.length,
+      descriptionLength: description?.length,
       useVectorStore,
       namespace,
     })
@@ -126,6 +129,7 @@ export async function POST(request: Request) {
       isGroundTruth: isTrainingMode,
       measurement,
       prompt: prompt?.trim() || undefined,
+      description: description?.trim() || undefined,
       useGemini,
       namespace,
     }
@@ -139,11 +143,15 @@ export async function POST(request: Request) {
     )
 
     // If we have a perfect vector store match (confidence > 0.99), adjust the confidence to 100%
-    if (useVectorStore && result.similarCases?.length > 0) {
+    if (
+      useVectorStore &&
+      result.similarCases &&
+      result.similarCases.length > 0
+    ) {
       const perfectMatch = result.similarCases.some((c) => c.confidence > 0.99)
       if (perfectMatch) {
         result.confidence = 1.0
-        if (result.diagnosis) {
+        if (result.diagnosis && typeof result.diagnosis === 'object') {
           result.diagnosis.confidence_level = 1.0
           result.diagnosis.key_observations.push(
             'Exact match found in reference database'
@@ -161,7 +169,8 @@ export async function POST(request: Request) {
       expectedState: state,
       measurement,
       customPromptUsed: !!prompt,
-      promptSource: 'folder', // Indicate that this prompt came from a folder's prompt.txt
+      folderDescription: description,
+      promptSource: 'folder',
     }
 
     return new Response(JSON.stringify(response), {
@@ -182,7 +191,7 @@ export async function POST(request: Request) {
   }
 }
 
-function normalizeCategoryName(folderPath: string): string {
+export function normalizeCategoryName(folderPath: string): string {
   const parts = folderPath.split('/')
   const categoryFolder = parts.find((p) => /^\d{2}-/.test(p)) || ''
   return categoryFolder
@@ -191,7 +200,7 @@ function normalizeCategoryName(folderPath: string): string {
     .replace(/\s+/g, '_')
 }
 
-function normalizeState(folderPath: string): {
+export function normalizeState(folderPath: string): {
   state: string
   measurement?: string
 } {
