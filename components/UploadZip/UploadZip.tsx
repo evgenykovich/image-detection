@@ -1,7 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { useAtomValue } from 'jotai'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -258,12 +257,7 @@ export const UploadZip = () => {
     []
   )
 
-  // Load namespaces on component mount
-  useEffect(() => {
-    loadNamespaces()
-  }, [])
-
-  const loadNamespaces = async () => {
+  const loadNamespaces = useCallback(async () => {
     try {
       const response = await fetch('/api/namespaces')
       if (!response.ok) throw new Error('Failed to load namespaces')
@@ -277,7 +271,12 @@ export const UploadZip = () => {
     } catch (error) {
       console.error('Error loading namespaces:', error)
     }
-  }
+  }, [selectedNamespace])
+
+  // Load namespaces on component mount
+  useEffect(() => {
+    loadNamespaces()
+  }, [loadNamespaces])
 
   const handleAddNamespace = async () => {
     try {

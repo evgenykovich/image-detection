@@ -1,6 +1,12 @@
 import { Pinecone } from '@pinecone-database/pinecone'
 import OpenAI from 'openai'
-import { Category, State, ImageFeatures, SimilarCase } from '@/types/validation'
+import {
+  Category,
+  State,
+  ImageFeatures,
+  SimilarCase,
+  ValidationDiagnosis,
+} from '@/types/validation'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -39,11 +45,11 @@ export async function storeValidationCase(
   category: Category,
   state: State,
   features: ImageFeatures,
-  diagnosis: string,
+  diagnosis: string | ValidationDiagnosis,
   keyFeatures: string[],
-  confidence: number = 0.5, // Default confidence if not provided
-  prompt?: string, // Add prompt parameter
-  namespace?: string // Default to root namespace if not provided
+  confidence: number = 0.5,
+  prompt?: string,
+  namespace?: string
 ) {
   try {
     console.log('Storing validation case:', {
@@ -81,80 +87,86 @@ export async function storeValidationCase(
       metadata.prompt = truncatedPrompt
     }
 
-    // Add diagnosis if it's not too long
-    let diagnosisValue = diagnosis
+    // Process diagnosis
+    let diagnosisValue: ValidationDiagnosis
     if (typeof diagnosis === 'string') {
       // Clean any markdown code block markers and trim whitespace
-      diagnosisValue = diagnosis.replace(/```json\n|\n```/g, '').trim()
+      const cleanedDiagnosis = diagnosis.replace(/```json\n|\n```/g, '').trim()
       try {
-        // If it's a JSON string, parse it and stringify it cleanly
-        const parsedDiagnosis = JSON.parse(diagnosisValue)
-        diagnosisValue = JSON.stringify(parsedDiagnosis)
+        // If it's a JSON string, parse it
+        const parsedDiagnosis = JSON.parse(cleanedDiagnosis)
+        if (typeof parsedDiagnosis === 'object' && parsedDiagnosis !== null) {
+          diagnosisValue = {
+            overall_assessment: parsedDiagnosis.overall_assessment || 'Unknown',
+            confidence_level: parsedDiagnosis.confidence_level || confidence,
+            key_observations: parsedDiagnosis.key_observations || [
+              cleanedDiagnosis,
+            ],
+            matched_criteria: parsedDiagnosis.matched_criteria || [],
+            failed_criteria: parsedDiagnosis.failed_criteria || [],
+            detailed_explanation:
+              parsedDiagnosis.detailed_explanation || cleanedDiagnosis,
+          }
+        } else {
+          diagnosisValue = {
+            overall_assessment: 'Unknown',
+            confidence_level: confidence,
+            key_observations: [cleanedDiagnosis],
+            matched_criteria: [],
+            failed_criteria: [],
+            detailed_explanation: cleanedDiagnosis,
+          }
+        }
       } catch (e) {
-        // If not valid JSON, use as is after cleaning markdown
-        console.warn('Diagnosis is not valid JSON, using cleaned string')
+        // If not valid JSON, create a simple diagnosis object
+        diagnosisValue = {
+          overall_assessment: 'Unknown',
+          confidence_level: confidence,
+          key_observations: [cleanedDiagnosis],
+          matched_criteria: [],
+          failed_criteria: [],
+          detailed_explanation: cleanedDiagnosis,
+        }
       }
     } else {
-      // If diagnosis is already an object, stringify it cleanly
-      diagnosisValue = JSON.stringify(diagnosis)
+      // If diagnosis is already a ValidationDiagnosis object
+      diagnosisValue = diagnosis
     }
 
-    // Truncate if too long
-    diagnosisValue =
-      diagnosisValue.length > 500
-        ? diagnosisValue.substring(0, 500) + '...'
-        : diagnosisValue
-    const tempMetadata = { ...metadata, diagnosis: diagnosisValue }
-    const metadataSize = new TextEncoder().encode(
-      JSON.stringify(tempMetadata)
-    ).length
-
-    if (metadataSize <= 40000) {
-      metadata.diagnosis = diagnosisValue
-    } else {
-      console.warn(
-        `Metadata size (${metadataSize} bytes) exceeds limit, storing without diagnosis`
-      )
-    }
+    metadata.diagnosis = JSON.stringify(diagnosisValue)
 
     // Get embeddings for the feature vector
-    const response = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: generateDescription(features),
-      encoding_format: 'float',
+    const featureDescription = generateDescription(features)
+    const embeddingResponse = await openai.embeddings.create({
+      input: featureDescription,
+      model: 'text-embedding-ada-002',
     })
 
-    const vector = response.data[0].embedding
+    const vector = embeddingResponse.data[0].embedding
 
-    // Get the namespaced index
-    const namespaceIndex = getNamespacedIndex(namespace)
-
-    // Store in Pinecone with confidence in the ID for better tracking
-    const id = `${category}-${state}-${confidence.toFixed(2)}-${Date.now()}`
-    console.log('Upserting to Pinecone:', {
-      id,
-      metadata: { ...metadata, diagnosis: undefined },
-      namespace: namespace || '_default_',
-    })
-
-    // Upsert using namespaced index - don't pass namespace parameter since we're using namespaced index
-    await namespaceIndex.upsert([
+    // Store in Pinecone
+    const namespacedIndex = getNamespacedIndex(namespace)
+    await namespacedIndex.upsert([
       {
-        id,
+        id: `${category}-${state}-${Date.now()}`,
         values: vector,
         metadata,
       },
     ])
 
-    console.log('Successfully stored validation case:', id)
-  } catch (error) {
-    console.error('Failed to store validation case:', {
-      error,
+    // Return an array with a single SimilarCase object
+    const similarCase: SimilarCase = {
+      imageUrl,
       category,
       state,
-      stack: error instanceof Error ? error.stack : undefined,
-    })
-    // Re-throw the error to be handled by the caller
+      confidence,
+      keyFeatures,
+      diagnosis: diagnosisValue,
+    }
+
+    return [similarCase]
+  } catch (error) {
+    console.error('Error storing validation case:', error)
     throw error
   }
 }
@@ -210,6 +222,37 @@ export async function findSimilarCases(
         .filter((match) => match.metadata)
         .map((match) => {
           const metadata = match.metadata as Record<string, string | number>
+
+          // Parse diagnosis from metadata
+          let diagnosisValue: ValidationDiagnosis
+          try {
+            const diagnosisStr = metadata.diagnosis?.toString() || ''
+            const parsedDiagnosis = JSON.parse(diagnosisStr)
+            diagnosisValue = {
+              overall_assessment:
+                parsedDiagnosis.overall_assessment || 'Unknown',
+              confidence_level:
+                parsedDiagnosis.confidence_level ||
+                Number(metadata.confidence) ||
+                match.score ||
+                0,
+              key_observations: parsedDiagnosis.key_observations || [],
+              matched_criteria: parsedDiagnosis.matched_criteria || [],
+              failed_criteria: parsedDiagnosis.failed_criteria || [],
+              detailed_explanation: parsedDiagnosis.detailed_explanation || '',
+            }
+          } catch (e) {
+            // If parsing fails, create a default diagnosis
+            diagnosisValue = {
+              overall_assessment: 'Unknown',
+              confidence_level: Number(metadata.confidence) || match.score || 0,
+              key_observations: [],
+              matched_criteria: [],
+              failed_criteria: [],
+              detailed_explanation: metadata.diagnosis?.toString() || '',
+            }
+          }
+
           return {
             imageUrl: '',
             category: metadata.category as Category,
@@ -231,7 +274,7 @@ export async function findSimilarCases(
               },
               visualFeatures: [],
             },
-            diagnosis: metadata.diagnosis?.toString() || '',
+            diagnosis: diagnosisValue,
             confidence: Number(metadata.confidence) || match.score || 0,
             keyFeatures: JSON.parse(metadata.keyFeatures as string),
           }
