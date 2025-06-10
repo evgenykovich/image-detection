@@ -8,6 +8,7 @@ import {
 } from '@/lib/config/validation-templates'
 import { Category } from '@/types/validation'
 import { processImageBuffer } from '../validate-image/route'
+export const maxDuration = 300
 
 // Initialize the model with environment variables
 const model = new ChatOpenAI({
