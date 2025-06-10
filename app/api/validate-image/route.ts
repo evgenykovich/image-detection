@@ -9,6 +9,7 @@ if (typeof window === 'undefined') {
 import { validateImage } from '@/lib/services/validation'
 import { Category, State } from '@/types/validation'
 import { NextResponse } from 'next/server'
+export const maxDuration = 300
 
 export async function processImageBuffer(base64Image: string): Promise<Buffer> {
   try {
