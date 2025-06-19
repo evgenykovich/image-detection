@@ -1,4 +1,3 @@
-import { Pinecone } from '@pinecone-database/pinecone'
 import { readdir, readFile } from 'fs/promises'
 import { join, basename } from 'path'
 
@@ -11,7 +10,7 @@ if (typeof window === 'undefined') {
 }
 
 import { extractImageFeatures } from '@/lib/services/featureExtraction'
-import { storeValidationCase } from '@/lib/services/vectorStorage'
+import { vectorStore } from '@/lib/services/vectorStorage'
 import { Category, State } from '@/types/validation'
 
 const TRAINING_DATA_PATH = join(process.cwd(), 'training-data')
@@ -45,14 +44,15 @@ const CATEGORY_MAPPING: Record<string, Category> = {
 async function processGroundTruthImage(
   imagePath: string,
   category: Category,
-  state: State
+  state: State,
+  namespace: string
 ) {
   try {
     const imageBuffer = await readFile(imagePath)
     const features = await extractImageFeatures(imageBuffer)
 
     // Store as ground truth example with high confidence
-    await storeValidationCase(
+    await vectorStore.storeValidationCase(
       `file://${imagePath}`,
       category,
       state,
@@ -63,91 +63,74 @@ async function processGroundTruthImage(
         `Category: ${category}`,
         'Source: Expert validated',
       ],
-      1.0 // Maximum confidence for ground truth
+      1.0, // Maximum confidence for ground truth
+      undefined,
+      namespace
     )
 
     console.log(
-      `✓ Processed ground truth: ${basename(imagePath)} as ${state} ${category}`
+      `✓ Processed ground truth: ${basename(
+        imagePath
+      )} as ${state} ${category} in namespace ${namespace}`
     )
   } catch (error) {
     console.error(`✗ Error processing ${imagePath}:`, error)
   }
 }
 
-export async function loadTrainingData() {
-  console.log('\n🔍 Loading ground truth examples from training data...\n')
-
+// Main function to process all training data
+export async function processTrainingData(namespace: string = '_default_') {
   try {
-    // Process each category folder
+    // Clear existing training data for this namespace
+    await vectorStore.clearNamespace(namespace)
+    console.log(`Cleared existing data in namespace: ${namespace}`)
+
+    // Read all category folders
     const categoryFolders = await readdir(TRAINING_DATA_PATH)
-    let totalProcessed = 0
-    let totalErrors = 0
 
     for (const categoryFolder of categoryFolders) {
-      const categoryPath = join(TRAINING_DATA_PATH, categoryFolder)
-      const categoryMatch = categoryFolder.match(/^\d{2}-(.+)$/)
-      if (!categoryMatch) continue
-
-      const categoryName = categoryMatch[1]
-      const category = CATEGORY_MAPPING[categoryName]
+      const category = CATEGORY_MAPPING[categoryFolder]
       if (!category) {
-        console.warn(`⚠️  Unknown category: ${categoryName}`)
+        console.warn(`⚠ Skipping unknown category folder: ${categoryFolder}`)
         continue
       }
 
-      console.log(`\n📁 Processing category: ${categoryName}`)
-
-      // Process each state folder within the category
+      const categoryPath = join(TRAINING_DATA_PATH, categoryFolder)
       const stateFolders = await readdir(categoryPath)
-      for (const stateFolder of stateFolders) {
-        const statePath = join(categoryPath, stateFolder)
-        const stateMatch = stateFolder.match(/^\d{2}-(.+)$/)
-        if (!stateMatch) continue
 
-        const stateName = stateMatch[1]
-        const state = STATE_MAPPING[stateName]
+      for (const stateFolder of stateFolders) {
+        const state = STATE_MAPPING[stateFolder]
         if (!state) {
-          console.warn(`⚠️  Unknown state: ${stateName}`)
+          console.warn(
+            `⚠ Skipping unknown state folder: ${stateFolder} in category ${categoryFolder}`
+          )
           continue
         }
 
-        console.log(`  📂 Processing state: ${stateName}`)
+        const statePath = join(categoryPath, stateFolder)
+        const imageFiles = await readdir(statePath)
 
-        // Process each image in the state folder
-        const images = await readdir(statePath)
-        let folderProcessed = 0
-
-        for (const image of images) {
-          if (!/\.(jpg|jpeg|png)$/i.test(image)) continue
-          try {
+        for (const imageFile of imageFiles) {
+          if (imageFile.match(/\.(jpg|jpeg|png)$/i)) {
             await processGroundTruthImage(
-              join(statePath, image),
+              join(statePath, imageFile),
               category,
-              state
+              state,
+              namespace
             )
-            folderProcessed++
-            totalProcessed++
-          } catch (error) {
-            totalErrors++
           }
         }
-
-        console.log(`     ↳ Processed ${folderProcessed} images`)
       }
     }
 
-    console.log('\n✅ Ground truth loading complete!')
-    console.log(`   Processed: ${totalProcessed} images`)
-    if (totalErrors > 0) {
-      console.log(`   Errors: ${totalErrors} images`)
-    }
+    console.log(
+      `✓ Training data processing complete for namespace: ${namespace}`
+    )
   } catch (error) {
-    console.error('\n❌ Error loading ground truth data:', error)
+    console.error('✗ Error processing training data:', error)
     throw error
   }
 }
 
-// Only run directly if this is the main module
-if (require.main === module) {
-  loadTrainingData().catch(console.error)
-}
+// Run the processing
+processTrainingData().catch(console.error)

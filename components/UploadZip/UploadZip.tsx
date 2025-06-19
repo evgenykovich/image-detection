@@ -28,6 +28,38 @@ import { DropZoneUpload } from '../DropZoneUpload'
 import { Download, Folder, ChevronDown, Loader2, Check } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 
+interface VectorStoreStats {
+  namespace: string
+  vectorCount: number
+  lastUpdated: string | null
+  created: string | null
+  sampleMetadata: Array<{
+    id: string
+    category: string
+    state: string
+    createdAt: string
+    confidence?: number
+    keyFeatures?: string[]
+    prompt?: string
+    features?: {
+      structuralFeatures: {
+        edges: number
+        contrast: number
+        brightness: number
+        sharpness: number
+      }
+      metadata: {
+        dimensions: {
+          width: number
+          height: number
+        }
+        format: string
+        size: number
+      }
+    }
+  }>
+}
+
 interface ValidationResponse {
   isValid: boolean
   confidence: number
@@ -257,6 +289,35 @@ export const UploadZip = () => {
     []
   )
 
+  const [vectorStats, setVectorStats] = useState<VectorStoreStats | null>(null)
+  const [isLoadingStats, setIsLoadingStats] = useState(false)
+  const [isDeletingVector, setIsDeletingVector] = useState<string | null>(null)
+
+  // Add fetchVectorStats function
+  const fetchVectorStats = useCallback(async () => {
+    if (!selectedNamespace) return
+
+    try {
+      setIsLoadingStats(true)
+      const response = await fetch(
+        `/api/vector-stats?namespace=${selectedNamespace}`
+      )
+      if (!response.ok) throw new Error('Failed to fetch vector store stats')
+      const data = await response.json()
+      setVectorStats(data)
+    } catch (error) {
+      console.error('Error fetching vector store stats:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch vector store statistics',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsLoadingStats(false)
+    }
+  }, [selectedNamespace, toast])
+
+  // Update loadNamespaces to also fetch stats
   const loadNamespaces = useCallback(async () => {
     try {
       const response = await fetch('/api/namespaces')
@@ -268,15 +329,62 @@ export const UploadZip = () => {
       if (data.namespaces.length > 0 && !selectedNamespace) {
         setSelectedNamespace(data.namespaces[0].id)
       }
+
+      // Fetch stats for the selected namespace
+      if (selectedNamespace) {
+        await fetchVectorStats()
+      }
     } catch (error) {
       console.error('Error loading namespaces:', error)
     }
-  }, [selectedNamespace])
+  }, [selectedNamespace, fetchVectorStats])
+
+  // Add effect to fetch stats when namespace changes
+  useEffect(() => {
+    if (selectedNamespace) {
+      fetchVectorStats()
+    }
+  }, [selectedNamespace, fetchVectorStats])
 
   // Load namespaces on component mount
   useEffect(() => {
     loadNamespaces()
   }, [loadNamespaces])
+
+  // Update handleClearVectorStore to refresh stats
+  const handleClearVectorStore = async () => {
+    if (!selectedNamespace) return
+
+    try {
+      setIsClearingVectorStore(true)
+      const response = await fetch('/api/clear-vector-store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace: selectedNamespace }),
+      })
+
+      if (!response.ok) throw new Error('Failed to clear vector store')
+
+      toast({
+        title: 'Success',
+        description: 'Vector store cleared successfully',
+        variant: 'default',
+      })
+
+      // Refresh stats after clearing
+      await fetchVectorStats()
+    } catch (error) {
+      console.error('Error clearing vector store:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to clear vector store',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsClearingVectorStore(false)
+      setIsClearConfirmOpen(false)
+    }
+  }
 
   const handleAddNamespace = async () => {
     try {
@@ -305,37 +413,6 @@ export const UploadZip = () => {
         variant: 'destructive',
       })
       setIsAddingNamespace(false)
-    }
-  }
-
-  const handleClearVectorStore = async () => {
-    if (!selectedNamespace) return
-
-    try {
-      setIsClearingVectorStore(true)
-      const response = await fetch('/api/clear-vector-store', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ namespace: selectedNamespace }),
-      })
-
-      if (!response.ok) throw new Error('Failed to clear vector store')
-
-      toast({
-        title: 'Success',
-        description: 'Vector store cleared successfully',
-        variant: 'default',
-      })
-    } catch (error) {
-      console.error('Error clearing vector store:', error)
-      toast({
-        title: 'Error',
-        description: 'Failed to clear vector store',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsClearingVectorStore(false)
-      setIsClearConfirmOpen(false)
     }
   }
 
@@ -599,22 +676,41 @@ export const UploadZip = () => {
   }
 
   const handleValidate = async () => {
-    if (selectedFolders.length === 0) return
-
-    // Check if any selected folders are missing prompts
-    const foldersWithoutPrompts = selectedFolders.filter(
-      (folder) => !folderStructure[folder].prompt
-    )
-
-    if (foldersWithoutPrompts.length > 0) {
-      setFoldersNeedingPrompts(foldersWithoutPrompts)
-      setCurrentEditingFolder(foldersWithoutPrompts[0])
-      setIsPromptDialogOpen(true)
+    if (!selectedFolders.length) {
+      toast({
+        title: 'Error',
+        description: 'Please select at least one folder to validate',
+        variant: 'destructive',
+      })
       return
     }
 
-    // Proceed with validation if all folders have prompts
-    await processValidation()
+    if (validationMode === 'training' && !selectedNamespace) {
+      toast({
+        title: 'Error',
+        description: 'Please select a namespace for storing training examples',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsProcessing(true)
+    setProgress(0)
+    setProcessedFiles(0)
+    setResults([])
+
+    try {
+      await processValidation()
+    } catch (error) {
+      console.error('Error during validation:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to validate images',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   const processValidation = async () => {
@@ -1077,6 +1173,43 @@ export const UploadZip = () => {
     })
   }
 
+  // Add this function after the other API-related functions
+  const handleDeleteVector = async (vectorId: string) => {
+    if (!selectedNamespace) return
+
+    try {
+      setIsDeletingVector(vectorId)
+      const response = await fetch('/api/vectors', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          namespace: selectedNamespace,
+          vectorId: vectorId,
+        }),
+      })
+
+      if (!response.ok) throw new Error('Failed to delete vector')
+
+      toast({
+        title: 'Success',
+        description: 'Vector deleted successfully',
+        variant: 'default',
+      })
+
+      // Refresh stats after deletion
+      await fetchVectorStats()
+    } catch (error) {
+      console.error('Error deleting vector:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to delete vector',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsDeletingVector(null)
+    }
+  }
+
   return (
     <div className="w-full max-w-4xl space-y-6">
       <div className="flex items-center justify-between p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg">
@@ -1171,23 +1304,304 @@ export const UploadZip = () => {
           </div>
         </div>
 
+        {/* Vector Store Stats */}
+        {selectedNamespace && (
+          <div className="mt-4 space-y-4">
+            <div className="bg-white/5 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-semibold text-white">
+                  Vector Store Statistics
+                </h4>
+                <Button
+                  onClick={() => setIsClearConfirmOpen(true)}
+                  disabled={isClearingVectorStore || !selectedNamespace}
+                  variant="outline"
+                  className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/30"
+                >
+                  {isClearingVectorStore ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Clearing...
+                    </>
+                  ) : (
+                    'Clear Vector Store'
+                  )}
+                </Button>
+              </div>
+
+              {isLoadingStats ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+                </div>
+              ) : vectorStats ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-white/70">Total Vectors</span>
+                        <span className="text-white font-medium">
+                          {vectorStats.vectorCount}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-white/70">Last Updated</span>
+                        <span className="text-white font-medium">
+                          {vectorStats.lastUpdated
+                            ? new Date(
+                                vectorStats.lastUpdated
+                              ).toLocaleDateString()
+                            : 'Never'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-white/70">Created</span>
+                        <span className="text-white font-medium">
+                          {vectorStats.created
+                            ? new Date(vectorStats.created).toLocaleDateString()
+                            : 'Unknown'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {vectorStats.sampleMetadata &&
+                      vectorStats.sampleMetadata.length > 0 && (
+                        <div className="space-y-2">
+                          <h5 className="text-sm font-medium text-white/90">
+                            Sample Categories
+                          </h5>
+                          <div className="space-y-1">
+                            {vectorStats.sampleMetadata
+                              .slice(0, 3)
+                              .map((metadata, idx) => (
+                                <div
+                                  key={idx}
+                                  className="text-sm text-white/70"
+                                >
+                                  {metadata.category} ({metadata.state})
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                  </div>
+
+                  {/* Stored Vectors List */}
+                  {vectorStats.sampleMetadata &&
+                    vectorStats.sampleMetadata.length > 0 && (
+                      <div className="mt-4 border-t border-white/10 pt-4">
+                        <h5 className="text-sm font-medium text-white/90 mb-3 flex items-center justify-between">
+                          <span>
+                            Stored Vectors ({vectorStats.sampleMetadata.length})
+                          </span>
+                          <span className="text-xs text-white/60">
+                            Click a vector to remove it
+                          </span>
+                        </h5>
+                        <ScrollArea className="h-[400px] w-full rounded-md border border-white/10 bg-white/5">
+                          <div className="p-4 space-y-3">
+                            {vectorStats.sampleMetadata.map((metadata, idx) => (
+                              <div
+                                key={idx}
+                                className={`
+                                group flex flex-col
+                                rounded-lg transition-all duration-200 overflow-hidden
+                                ${
+                                  isDeletingVector === metadata.id
+                                    ? 'bg-red-500/20 border-red-500/30'
+                                    : 'hover:bg-white/10 border border-transparent hover:border-white/20'
+                                }
+                              `}
+                              >
+                                {/* Main Info Row */}
+                                <div className="flex items-center justify-between p-3 group">
+                                  <div className="flex items-center space-x-3 flex-1">
+                                    <div className="flex items-center space-x-2 min-w-[200px]">
+                                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                                      <span className="text-sm font-medium text-white/90">
+                                        {metadata.category}
+                                      </span>
+                                    </div>
+                                    <span className="px-2 py-1 text-xs rounded-full bg-white/10 text-white/70">
+                                      {metadata.state}
+                                    </span>
+                                    <span className="text-xs text-white/50">
+                                      ID: {(metadata.id || '').substring(0, 8)}
+                                      ...
+                                    </span>
+                                    {metadata.confidence && (
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                          <div
+                                            className="h-full bg-blue-500 transition-all duration-300"
+                                            style={{
+                                              width: `${
+                                                metadata.confidence * 100
+                                              }%`,
+                                            }}
+                                          />
+                                        </div>
+                                        <span className="text-xs text-white/50">
+                                          {(metadata.confidence * 100).toFixed(
+                                            1
+                                          )}
+                                          % confidence
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-white/40">
+                                      {new Date(
+                                        metadata.createdAt
+                                      ).toLocaleDateString()}
+                                    </span>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() =>
+                                        handleDeleteVector(metadata.id)
+                                      }
+                                      disabled={
+                                        isDeletingVector === metadata.id
+                                      }
+                                      className={`
+                                      opacity-0 group-hover:opacity-100 transition-opacity
+                                      hover:bg-red-500/20 hover:text-red-400
+                                      ${
+                                        isDeletingVector === metadata.id
+                                          ? 'opacity-100'
+                                          : ''
+                                      }
+                                    `}
+                                    >
+                                      {isDeletingVector === metadata.id ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                      ) : (
+                                        <svg
+                                          className="w-4 h-4"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          viewBox="0 0 24 24"
+                                        >
+                                          <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                          />
+                                        </svg>
+                                      )}
+                                    </Button>
+                                  </div>
+                                </div>
+
+                                {/* Expandable Details */}
+                                <div className="px-3 pb-3 text-xs text-white/60 space-y-2">
+                                  {metadata.features && (
+                                    <div className="grid grid-cols-2 gap-2 p-2 bg-white/5 rounded">
+                                      <div>
+                                        <div className="text-[10px] font-medium mb-1">
+                                          Image Info
+                                        </div>
+                                        <div className="space-y-0.5">
+                                          <div className="flex justify-between">
+                                            <span>Format:</span>
+                                            <span className="text-white/90">
+                                              {
+                                                metadata.features.metadata
+                                                  .format
+                                              }
+                                            </span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>Size:</span>
+                                            <span className="text-white/90">
+                                              {(
+                                                metadata.features.metadata
+                                                  .size / 1024
+                                              ).toFixed(1)}{' '}
+                                              KB
+                                            </span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>Dimensions:</span>
+                                            <span className="text-white/90">
+                                              {
+                                                metadata.features.metadata
+                                                  .dimensions.width
+                                              }{' '}
+                                              x{' '}
+                                              {
+                                                metadata.features.metadata
+                                                  .dimensions.height
+                                              }
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <div className="text-[10px] font-medium mb-1">
+                                          Features
+                                        </div>
+                                        <div className="space-y-0.5">
+                                          {Object.entries(
+                                            metadata.features.structuralFeatures
+                                          ).map(([key, value]) => (
+                                            <div
+                                              key={key}
+                                              className="flex justify-between"
+                                            >
+                                              <span className="capitalize">
+                                                {key}:
+                                              </span>
+                                              <span className="text-white/90">
+                                                {value.toFixed(2)}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {metadata.keyFeatures &&
+                                    metadata.keyFeatures.length > 0 && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {metadata.keyFeatures.map(
+                                          (feature, fidx) => (
+                                            <span
+                                              key={fidx}
+                                              className="px-1.5 py-0.5 rounded-md bg-white/5 text-white/70 text-[10px]"
+                                            >
+                                              {feature}
+                                            </span>
+                                          )
+                                        )}
+                                      </div>
+                                    )}
+                                  {metadata.prompt && (
+                                    <div className="mt-2 text-[10px] font-mono bg-white/5 p-2 rounded">
+                                      {metadata.prompt}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      </div>
+                    )}
+                </div>
+              ) : (
+                <div className="text-center py-4 text-white/60">
+                  No statistics available
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mt-4">
           <div></div>
-          <Button
-            onClick={() => setIsClearConfirmOpen(true)}
-            disabled={isClearingVectorStore || !selectedNamespace}
-            variant="outline"
-            className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/30"
-          >
-            {isClearingVectorStore ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Clearing...
-              </>
-            ) : (
-              'Clear Vector Store'
-            )}
-          </Button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1196,9 +1610,14 @@ export const UploadZip = () => {
             <label className="text-sm font-medium text-white/90">Mode</label>
             <select
               value={validationMode}
-              onChange={(e) =>
-                setValidationMode(e.target.value as 'training' | 'validation')
-              }
+              onChange={(e) => {
+                const newMode = e.target.value as 'training' | 'validation'
+                setValidationMode(newMode)
+                // Always enable vector store in training mode
+                if (newMode === 'training') {
+                  setUseVectorStore(true)
+                }
+              }}
               className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
               disabled={isProcessing}
             >
@@ -1252,7 +1671,9 @@ export const UploadZip = () => {
               />
             </div>
             <p className="text-xs text-white/60">
-              Compare with similar examples
+              {validationMode === 'training'
+                ? 'Always enabled in training mode'
+                : 'Compare with similar examples'}
             </p>
           </div>
         </div>
@@ -1280,9 +1701,9 @@ export const UploadZip = () => {
                   Training Mode Active
                 </h4>
                 <p className="text-xs text-white/60">
-                  Images will be stored as ground truth examples with maximum
-                  confidence. Use this mode only for validated, correct
-                  examples.
+                  Images will be stored as ground truth examples in the selected
+                  namespace with maximum confidence. Use this mode only for
+                  validated, correct examples.
                 </p>
               </div>
             </div>
