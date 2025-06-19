@@ -51,7 +51,10 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       namespace: namespaceDetails?.name || namespace,
-      vectorCount,
+      totalVectors: vectorCount,
+      categories: Array.from(
+        new Set(sampleVectors.map((v) => (v.metadata as any).category))
+      ),
       lastUpdated: namespaceDetails?.updatedAt || null,
       created: namespaceDetails?.createdAt || null,
       sampleMetadata: sampleVectors.map((v: VectorData) => ({

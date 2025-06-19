@@ -25,39 +25,50 @@ import Image from 'next/image'
 import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import { DropZoneUpload } from '../DropZoneUpload'
-import { Download, Folder, ChevronDown, Loader2, Check } from 'lucide-react'
+import {
+  Download,
+  Folder,
+  ChevronDown,
+  Loader2,
+  Check,
+  Trash2,
+} from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 
 interface VectorStoreStats {
   namespace: string
-  vectorCount: number
+  totalVectors: number
+  categories: string[]
   lastUpdated: string | null
   created: string | null
-  sampleMetadata: Array<{
+  sampleMetadata: {
     id: string
     category: string
     state: string
+    confidence: number
     createdAt: string
-    confidence?: number
-    keyFeatures?: string[]
-    prompt?: string
     features?: {
       structuralFeatures: {
         edges: number
         contrast: number
-        brightness: number
         sharpness: number
+        brightness: number
       }
-      metadata: {
+      metadata?: {
+        format: string
+        size: number
         dimensions: {
           width: number
           height: number
         }
-        format: string
-        size: number
       }
+      visualFeatures?: number[]
     }
-  }>
+    diagnosis?: string
+    keyFeatures?: string[]
+    prompt?: string
+  }[]
 }
 
 interface ValidationResponse {
@@ -1237,478 +1248,385 @@ export const UploadZip = () => {
         </div>
       </div>
 
-      {/* Validation Settings Panel */}
-      <div className="p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-xl font-semibold text-white flex items-center gap-2">
+      {/* Enhanced Validation Section */}
+      <div className="space-y-6">
+        <Tabs defaultValue="validation" className="w-full">
+          <TabsList className="w-full">
+            <TabsTrigger value="validation" className="flex-1">
               Validation Settings
-              <span className="text-xs font-normal px-2 py-1 rounded-full bg-blue-500/20 text-blue-300">
-                Beta
-              </span>
-            </h3>
-            <p className="text-sm text-white/80">
-              Configure how images are validated and processed
-            </p>
-          </div>
-        </div>
-
-        {/* Customer Namespace Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-          <div className="space-y-2">
-            <Label className="text-white">Customer Namespace</Label>
-            <div className="flex gap-2">
-              <select
-                value={selectedNamespace}
-                onChange={(e) => setSelectedNamespace(e.target.value)}
-                className="flex-1 bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
-                disabled={isProcessing}
-              >
-                <option value="" className="bg-gray-800">
-                  Select a customer...
-                </option>
-                {availableNamespaces.map((ns) => (
-                  <option key={ns.id} value={ns.id} className="bg-gray-800">
-                    {ns.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-white">Add New Customer</Label>
-            <div className="flex gap-2">
-              <Input
-                value={newNamespaceName}
-                onChange={(e) => setNewNamespaceName(e.target.value)}
-                placeholder="Enter customer name"
-                className="flex-1 bg-white/5 border-white/10 text-white placeholder:text-white/40"
-                disabled={isAddingNamespace}
-              />
-              <Button
-                onClick={handleAddNamespace}
-                disabled={!newNamespaceName || isAddingNamespace}
-                className="bg-blue-500/80 hover:bg-blue-500/90 text-white"
-              >
-                {isAddingNamespace ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Adding...
-                  </>
-                ) : (
-                  'Add'
-                )}
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Vector Store Stats */}
-        {selectedNamespace && (
-          <div className="mt-4 space-y-4">
-            <div className="bg-white/5 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-lg font-semibold text-white">
-                  Vector Store Statistics
-                </h4>
-                <Button
-                  onClick={() => setIsClearConfirmOpen(true)}
-                  disabled={isClearingVectorStore || !selectedNamespace}
-                  variant="outline"
-                  className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/30"
-                >
-                  {isClearingVectorStore ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Clearing...
-                    </>
-                  ) : (
-                    'Clear Vector Store'
-                  )}
-                </Button>
+            </TabsTrigger>
+            <TabsTrigger value="vectors" className="flex-1">
+              Vector Store
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="validation">
+            <div className="p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg">
+              <div className="space-y-2">
+                <h3 className="text-xl font-semibold text-white">
+                  Validation Settings
+                </h3>
+                <p className="text-sm text-white/70">
+                  Configure how images are validated and processed.
+                </p>
               </div>
 
-              {isLoadingStats ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                {/* Mode Selection */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-white/90">
+                    Mode
+                  </label>
+                  <select
+                    value={validationMode}
+                    onChange={(e) => {
+                      const newMode = e.target.value as
+                        | 'training'
+                        | 'validation'
+                      setValidationMode(newMode)
+                      // Always enable vector store in training mode
+                      if (newMode === 'training') {
+                        setUseVectorStore(true)
+                      }
+                    }}
+                    className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
+                    disabled={isProcessing}
+                  >
+                    <option value="validation" className="text-black">
+                      Validation Mode
+                    </option>
+                    <option value="training" className="text-black">
+                      Tuning Mode
+                    </option>
+                  </select>
+                  <p className="text-xs text-white/60">
+                    {validationMode === 'training'
+                      ? 'Store images as ground truth examples'
+                      : 'Validate images against existing examples'}
+                  </p>
                 </div>
-              ) : vectorStats ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <span className="text-white/70">Total Vectors</span>
-                        <span className="text-white font-medium">
-                          {vectorStats.vectorCount}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-white/70">Last Updated</span>
-                        <span className="text-white font-medium">
-                          {vectorStats.lastUpdated
-                            ? new Date(
-                                vectorStats.lastUpdated
-                              ).toLocaleDateString()
-                            : 'Never'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-white/70">Created</span>
-                        <span className="text-white font-medium">
-                          {vectorStats.created
-                            ? new Date(vectorStats.created).toLocaleDateString()
-                            : 'Unknown'}
-                        </span>
-                      </div>
-                    </div>
 
-                    {vectorStats.sampleMetadata &&
-                      vectorStats.sampleMetadata.length > 0 && (
-                        <div className="space-y-2">
-                          <h5 className="text-sm font-medium text-white/90">
-                            Sample Categories
-                          </h5>
-                          <div className="space-y-1">
-                            {vectorStats.sampleMetadata
-                              .slice(0, 3)
-                              .map((metadata, idx) => (
-                                <div
-                                  key={idx}
-                                  className="text-sm text-white/70"
-                                >
-                                  {metadata.category} ({metadata.state})
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
+                {/* Model Selection */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-white/90">
+                    Model
+                  </label>
+                  <select
+                    value={useGemini ? 'gemini' : 'openai'}
+                    onChange={(e) => setUseGemini(e.target.value === 'gemini')}
+                    className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
+                    disabled={isProcessing}
+                  >
+                    <option value="openai" className="text-black">
+                      OpenAI GPT-4 Vision
+                    </option>
+                    <option value="gemini" className="text-black">
+                      Google Gemini
+                    </option>
+                  </select>
+                  <p className="text-xs text-white/60">
+                    {useGemini
+                      ? 'Using Google Gemini model for image analysis'
+                      : 'Using OpenAI GPT-4 Vision for image analysis'}
+                  </p>
+                </div>
+
+                {/* Vector Store Toggle */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-white/90">
+                      Vector Store
+                    </label>
+                    <Switch
+                      checked={useVectorStore}
+                      onCheckedChange={setUseVectorStore}
+                      disabled={isProcessing || validationMode === 'training'}
+                    />
                   </div>
-
-                  {/* Stored Vectors List */}
-                  {vectorStats.sampleMetadata &&
-                    vectorStats.sampleMetadata.length > 0 && (
-                      <div className="mt-4 border-t border-white/10 pt-4">
-                        <h5 className="text-sm font-medium text-white/90 mb-3 flex items-center justify-between">
-                          <span>
-                            Stored Vectors ({vectorStats.sampleMetadata.length})
-                          </span>
-                          <span className="text-xs text-white/60">
-                            Click a vector to remove it
-                          </span>
-                        </h5>
-                        <ScrollArea className="h-[400px] w-full rounded-md border border-white/10 bg-white/5">
-                          <div className="p-4 space-y-3">
-                            {vectorStats.sampleMetadata.map((metadata, idx) => (
-                              <div
-                                key={idx}
-                                className={`
-                                group flex flex-col
-                                rounded-lg transition-all duration-200 overflow-hidden
-                                ${
-                                  isDeletingVector === metadata.id
-                                    ? 'bg-red-500/20 border-red-500/30'
-                                    : 'hover:bg-white/10 border border-transparent hover:border-white/20'
-                                }
-                              `}
-                              >
-                                {/* Main Info Row */}
-                                <div className="flex items-center justify-between p-3 group">
-                                  <div className="flex items-center space-x-3 flex-1">
-                                    <div className="flex items-center space-x-2 min-w-[200px]">
-                                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                                      <span className="text-sm font-medium text-white/90">
-                                        {metadata.category}
-                                      </span>
-                                    </div>
-                                    <span className="px-2 py-1 text-xs rounded-full bg-white/10 text-white/70">
-                                      {metadata.state}
-                                    </span>
-                                    <span className="text-xs text-white/50">
-                                      ID: {(metadata.id || '').substring(0, 8)}
-                                      ...
-                                    </span>
-                                    {metadata.confidence && (
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                          <div
-                                            className="h-full bg-blue-500 transition-all duration-300"
-                                            style={{
-                                              width: `${
-                                                metadata.confidence * 100
-                                              }%`,
-                                            }}
-                                          />
-                                        </div>
-                                        <span className="text-xs text-white/50">
-                                          {(metadata.confidence * 100).toFixed(
-                                            1
-                                          )}
-                                          % confidence
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs text-white/40">
-                                      {new Date(
-                                        metadata.createdAt
-                                      ).toLocaleDateString()}
-                                    </span>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() =>
-                                        handleDeleteVector(metadata.id)
-                                      }
-                                      disabled={
-                                        isDeletingVector === metadata.id
-                                      }
-                                      className={`
-                                      opacity-0 group-hover:opacity-100 transition-opacity
-                                      hover:bg-red-500/20 hover:text-red-400
-                                      ${
-                                        isDeletingVector === metadata.id
-                                          ? 'opacity-100'
-                                          : ''
-                                      }
-                                    `}
-                                    >
-                                      {isDeletingVector === metadata.id ? (
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                      ) : (
-                                        <svg
-                                          className="w-4 h-4"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          viewBox="0 0 24 24"
-                                        >
-                                          <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                          />
-                                        </svg>
-                                      )}
-                                    </Button>
-                                  </div>
-                                </div>
-
-                                {/* Expandable Details */}
-                                <div className="px-3 pb-3 text-xs text-white/60 space-y-2">
-                                  {metadata.features && (
-                                    <div className="grid grid-cols-2 gap-2 p-2 bg-white/5 rounded">
-                                      <div>
-                                        <div className="text-[10px] font-medium mb-1">
-                                          Image Info
-                                        </div>
-                                        <div className="space-y-0.5">
-                                          <div className="flex justify-between">
-                                            <span>Format:</span>
-                                            <span className="text-white/90">
-                                              {
-                                                metadata.features.metadata
-                                                  .format
-                                              }
-                                            </span>
-                                          </div>
-                                          <div className="flex justify-between">
-                                            <span>Size:</span>
-                                            <span className="text-white/90">
-                                              {(
-                                                metadata.features.metadata
-                                                  .size / 1024
-                                              ).toFixed(1)}{' '}
-                                              KB
-                                            </span>
-                                          </div>
-                                          <div className="flex justify-between">
-                                            <span>Dimensions:</span>
-                                            <span className="text-white/90">
-                                              {
-                                                metadata.features.metadata
-                                                  .dimensions.width
-                                              }{' '}
-                                              x{' '}
-                                              {
-                                                metadata.features.metadata
-                                                  .dimensions.height
-                                              }
-                                            </span>
-                                          </div>
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <div className="text-[10px] font-medium mb-1">
-                                          Features
-                                        </div>
-                                        <div className="space-y-0.5">
-                                          {Object.entries(
-                                            metadata.features.structuralFeatures
-                                          ).map(([key, value]) => (
-                                            <div
-                                              key={key}
-                                              className="flex justify-between"
-                                            >
-                                              <span className="capitalize">
-                                                {key}:
-                                              </span>
-                                              <span className="text-white/90">
-                                                {value.toFixed(2)}
-                                              </span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
-                                  {metadata.keyFeatures &&
-                                    metadata.keyFeatures.length > 0 && (
-                                      <div className="flex flex-wrap gap-1">
-                                        {metadata.keyFeatures.map(
-                                          (feature, fidx) => (
-                                            <span
-                                              key={fidx}
-                                              className="px-1.5 py-0.5 rounded-md bg-white/5 text-white/70 text-[10px]"
-                                            >
-                                              {feature}
-                                            </span>
-                                          )
-                                        )}
-                                      </div>
-                                    )}
-                                  {metadata.prompt && (
-                                    <div className="mt-2 text-[10px] font-mono bg-white/5 p-2 rounded">
-                                      {metadata.prompt}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </ScrollArea>
-                      </div>
-                    )}
+                  <p className="text-xs text-white/60">
+                    {validationMode === 'training'
+                      ? 'Always enabled in training mode'
+                      : 'Compare with similar examples'}
+                  </p>
                 </div>
-              ) : (
-                <div className="text-center py-4 text-white/60">
-                  No statistics available
+              </div>
+
+              {validationMode === 'training' && (
+                <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
+                  <div className="flex items-start gap-3">
+                    <div className="p-1.5 bg-yellow-500/20 rounded-full">
+                      <svg
+                        className="w-4 h-4 text-yellow-500"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        />
+                      </svg>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-yellow-500">
+                        Training Mode Active
+                      </h4>
+                      <p className="text-xs text-white/60">
+                        Images will be stored as ground truth examples in the
+                        selected namespace with maximum confidence. Use this
+                        mode only for validated, correct examples.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        <div className="flex items-center justify-between mt-4">
-          <div></div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Mode Selection */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-white/90">Mode</label>
-            <select
-              value={validationMode}
-              onChange={(e) => {
-                const newMode = e.target.value as 'training' | 'validation'
-                setValidationMode(newMode)
-                // Always enable vector store in training mode
-                if (newMode === 'training') {
-                  setUseVectorStore(true)
-                }
-              }}
-              className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
-              disabled={isProcessing}
-            >
-              <option value="validation" className="text-black">
-                Validation Mode
-              </option>
-              <option value="training" className="text-black">
-                Tuning Mode
-              </option>
-            </select>
-            <p className="text-xs text-white/60">
-              {validationMode === 'training'
-                ? 'Store images as ground truth examples'
-                : 'Validate images against existing examples'}
-            </p>
-          </div>
-
-          {/* Model Selection */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-white/90">Model</label>
-            <select
-              value={useGemini ? 'gemini' : 'openai'}
-              onChange={(e) => setUseGemini(e.target.value === 'gemini')}
-              className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
-              disabled={isProcessing}
-            >
-              <option value="openai" className="text-black">
-                OpenAI GPT-4 Vision
-              </option>
-              <option value="gemini" className="text-black">
-                Google Gemini
-              </option>
-            </select>
-            <p className="text-xs text-white/60">
-              {useGemini
-                ? 'Using Google Gemini model for image analysis'
-                : 'Using OpenAI GPT-4 Vision for image analysis'}
-            </p>
-          </div>
-
-          {/* Vector Store Toggle */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-white/90">
-                Vector Store
-              </label>
-              <Switch
-                checked={useVectorStore}
-                onCheckedChange={setUseVectorStore}
-                disabled={isProcessing || validationMode === 'training'}
-              />
-            </div>
-            <p className="text-xs text-white/60">
-              {validationMode === 'training'
-                ? 'Always enabled in training mode'
-                : 'Compare with similar examples'}
-            </p>
-          </div>
-        </div>
-
-        {validationMode === 'training' && (
-          <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
-            <div className="flex items-start gap-3">
-              <div className="p-1.5 bg-yellow-500/20 rounded-full">
-                <svg
-                  className="w-4 h-4 text-yellow-500"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-              </div>
-              <div>
-                <h4 className="text-sm font-medium text-yellow-500">
-                  Training Mode Active
-                </h4>
-                <p className="text-xs text-white/60">
-                  Images will be stored as ground truth examples in the selected
-                  namespace with maximum confidence. Use this mode only for
-                  validated, correct examples.
+          </TabsContent>
+          <TabsContent value="vectors">
+            <div className="p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg">
+              <div className="space-y-2">
+                <h3 className="text-xl font-semibold text-white">
+                  Vector Store Management
+                </h3>
+                <p className="text-sm text-white/70">
+                  View and manage stored vectors.
                 </p>
               </div>
+
+              {/* Vector Store Stats */}
+              {vectorStats && (
+                <div className="mt-6 space-y-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className="p-4 bg-white/5 rounded-lg">
+                      <div className="text-sm text-white/70">Total Vectors</div>
+                      <div className="text-2xl font-semibold text-white">
+                        {vectorStats?.totalVectors || 0}
+                      </div>
+                    </div>
+                    <div className="p-4 bg-white/5 rounded-lg">
+                      <div className="text-sm text-white/70">Categories</div>
+                      <div className="text-2xl font-semibold text-white">
+                        {vectorStats?.categories?.length || 0}
+                      </div>
+                    </div>
+                    <div className="p-4 bg-white/5 rounded-lg">
+                      <div className="text-sm text-white/70">Last Updated</div>
+                      <div className="text-2xl font-semibold text-white">
+                        {vectorStats.lastUpdated
+                          ? new Date(
+                              vectorStats.lastUpdated
+                            ).toLocaleDateString()
+                          : 'Never'}
+                      </div>
+                    </div>
+                    <div className="p-4 bg-white/5 rounded-lg">
+                      <div className="text-sm text-white/70">Created</div>
+                      <div className="text-2xl font-semibold text-white">
+                        {vectorStats.created
+                          ? new Date(vectorStats.created).toLocaleDateString()
+                          : 'Unknown'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sample Vectors */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-lg font-medium text-white">
+                        Sample Vectors
+                      </h4>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleClearVectorStore}
+                        disabled={isLoadingStats}
+                        className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/30"
+                      >
+                        Clear Vector Store
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {vectorStats?.sampleMetadata?.map((metadata, idx) => (
+                        <div
+                          key={idx}
+                          className={`
+                          group flex flex-col
+                          rounded-lg transition-all duration-200
+                          ${
+                            isDeletingVector === metadata.id
+                              ? 'bg-red-500/20 border-red-500/30'
+                              : 'bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20'
+                          }
+                        `}
+                        >
+                          {/* Main Info Row */}
+                          <div className="flex items-center justify-between p-4">
+                            <div className="flex items-center space-x-4">
+                              <div className="flex flex-col space-y-1">
+                                <div className="flex items-center space-x-2">
+                                  <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                                  <span className="text-sm font-medium text-white/90">
+                                    {metadata.category}
+                                  </span>
+                                  <span className="px-2 py-0.5 text-xs rounded-full bg-white/10 text-white/70">
+                                    {metadata.state}
+                                  </span>
+                                </div>
+                                <div className="flex items-center space-x-2 text-xs text-white/50">
+                                  <span>
+                                    ID: {(metadata.id || '').substring(0, 8)}...
+                                  </span>
+                                  <span>•</span>
+                                  <span>
+                                    {new Date(
+                                      metadata.createdAt
+                                    ).toLocaleDateString()}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              {metadata.confidence && (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full bg-blue-500 transition-all duration-300"
+                                      style={{
+                                        width: `${metadata.confidence * 100}%`,
+                                      }}
+                                    />
+                                  </div>
+                                  <span className="text-xs text-white/50">
+                                    {(metadata.confidence * 100).toFixed(1)}%
+                                  </span>
+                                </div>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteVector(metadata.id)}
+                                disabled={isDeletingVector === metadata.id}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                {isDeletingVector === metadata.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin text-red-500" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4 text-red-500" />
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Additional Info */}
+                          <div className="px-4 pb-4 space-y-3">
+                            {/* Diagnosis & Key Features */}
+                            {(metadata.diagnosis || metadata.keyFeatures) && (
+                              <div className="space-y-2">
+                                {metadata.diagnosis && (
+                                  <p className="text-sm text-white/70">
+                                    {metadata.diagnosis}
+                                  </p>
+                                )}
+                                {metadata.keyFeatures &&
+                                  metadata.keyFeatures.length > 0 && (
+                                    <div className="flex flex-wrap gap-1">
+                                      {metadata.keyFeatures.map(
+                                        (feature, i) => (
+                                          <span
+                                            key={i}
+                                            className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-300"
+                                          >
+                                            {feature}
+                                          </span>
+                                        )
+                                      )}
+                                    </div>
+                                  )}
+                              </div>
+                            )}
+
+                            {/* Features Accordion */}
+                            {metadata.features && (
+                              <Accordion
+                                type="single"
+                                collapsible
+                                className="w-full"
+                              >
+                                <AccordionItem
+                                  value="features"
+                                  className="border-white/10"
+                                >
+                                  <AccordionTrigger className="text-sm text-white/70 hover:text-white/90 hover:no-underline">
+                                    Features
+                                  </AccordionTrigger>
+                                  <AccordionContent>
+                                    <div className="space-y-4 pt-2">
+                                      {/* Structural Features */}
+                                      {metadata.features.structuralFeatures && (
+                                        <div className="space-y-2">
+                                          <h4 className="text-xs font-medium text-white/50">
+                                            Structural Features
+                                          </h4>
+                                          <div className="grid grid-cols-2 gap-x-12 gap-y-1">
+                                            {Object.entries(
+                                              metadata.features
+                                                .structuralFeatures
+                                            ).map(([key, value]) => (
+                                              <div
+                                                key={key}
+                                                className="flex items-center justify-between py-1"
+                                              >
+                                                <span className="text-sm text-white/60 capitalize">
+                                                  {key}
+                                                </span>
+                                                <span className="text-sm font-medium text-white/90">
+                                                  {typeof value === 'number'
+                                                    ? value.toFixed(2)
+                                                    : value}
+                                                </span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Visual Features */}
+                                      {metadata.features.visualFeatures && (
+                                        <div className="space-y-2">
+                                          <h4 className="text-xs font-medium text-white/50">
+                                            Visual Features
+                                          </h4>
+                                          <div className="grid grid-cols-4 gap-1 max-h-32 overflow-y-auto">
+                                            {metadata.features.visualFeatures.map(
+                                              (value, index) => (
+                                                <div
+                                                  key={index}
+                                                  className="text-xs text-white/60 py-0.5"
+                                                >
+                                                  {value.toFixed(4)}
+                                                </div>
+                                              )
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              </Accordion>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          </TabsContent>
+        </Tabs>
       </div>
 
       {(progress > 0 || isExtracting) && !isProcessing && (
