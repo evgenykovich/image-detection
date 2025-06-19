@@ -1447,11 +1447,12 @@ export const UploadZip = () => {
                       </Button>
                     </div>
 
-                    <div className="space-y-2">
-                      {vectorStats?.sampleMetadata?.map((metadata, idx) => (
-                        <div
-                          key={idx}
-                          className={`
+                    <ScrollArea className="h-[400px] rounded-lg border border-white/10">
+                      <div className="space-y-2 p-4">
+                        {vectorStats?.sampleMetadata?.map((metadata, idx) => (
+                          <div
+                            key={idx}
+                            className={`
                           group flex flex-col
                           rounded-lg transition-all duration-200
                           ${
@@ -1460,167 +1461,174 @@ export const UploadZip = () => {
                               : 'bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20'
                           }
                         `}
-                        >
-                          {/* Main Info Row */}
-                          <div className="flex items-center justify-between p-4">
-                            <div className="flex items-center space-x-4">
-                              <div className="flex flex-col space-y-1">
-                                <div className="flex items-center space-x-2">
-                                  <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                                  <span className="text-sm font-medium text-white/90">
-                                    {metadata.category}
-                                  </span>
-                                  <span className="px-2 py-0.5 text-xs rounded-full bg-white/10 text-white/70">
-                                    {metadata.state}
-                                  </span>
-                                </div>
-                                <div className="flex items-center space-x-2 text-xs text-white/50">
-                                  <span>
-                                    ID: {(metadata.id || '').substring(0, 8)}...
-                                  </span>
-                                  <span>•</span>
-                                  <span>
-                                    {new Date(
-                                      metadata.createdAt
-                                    ).toLocaleDateString()}
-                                  </span>
+                          >
+                            {/* Main Info Row */}
+                            <div className="flex items-center justify-between p-4">
+                              <div className="flex items-center space-x-4">
+                                <div className="flex flex-col space-y-1">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                                    <span className="text-sm font-medium text-white/90">
+                                      {metadata.category}
+                                    </span>
+                                    <span className="px-2 py-0.5 text-xs rounded-full bg-white/10 text-white/70">
+                                      {metadata.state}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center space-x-2 text-xs text-white/50">
+                                    <span>
+                                      ID: {(metadata.id || '').substring(0, 8)}
+                                      ...
+                                    </span>
+                                    <span>•</span>
+                                    <span>
+                                      {new Date(
+                                        metadata.createdAt
+                                      ).toLocaleDateString()}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              {metadata.confidence && (
-                                <div className="flex items-center gap-2">
-                                  <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                    <div
-                                      className="h-full bg-blue-500 transition-all duration-300"
-                                      style={{
-                                        width: `${metadata.confidence * 100}%`,
-                                      }}
-                                    />
+                              <div className="flex items-center gap-3">
+                                {metadata.confidence && (
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full bg-blue-500 transition-all duration-300"
+                                        style={{
+                                          width: `${
+                                            metadata.confidence * 100
+                                          }%`,
+                                        }}
+                                      />
+                                    </div>
+                                    <span className="text-xs text-white/50">
+                                      {(metadata.confidence * 100).toFixed(1)}%
+                                    </span>
                                   </div>
-                                  <span className="text-xs text-white/50">
-                                    {(metadata.confidence * 100).toFixed(1)}%
-                                  </span>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() =>
+                                    handleDeleteVector(metadata.id)
+                                  }
+                                  disabled={isDeletingVector === metadata.id}
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  {isDeletingVector === metadata.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin text-red-500" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
+
+                            {/* Additional Info */}
+                            <div className="px-4 pb-4 space-y-3">
+                              {/* Diagnosis & Key Features */}
+                              {(metadata.diagnosis || metadata.keyFeatures) && (
+                                <div className="space-y-2">
+                                  {metadata.diagnosis && (
+                                    <p className="text-sm text-white/70">
+                                      {metadata.diagnosis}
+                                    </p>
+                                  )}
+                                  {metadata.keyFeatures &&
+                                    metadata.keyFeatures.length > 0 && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {metadata.keyFeatures.map(
+                                          (feature, i) => (
+                                            <span
+                                              key={i}
+                                              className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-300"
+                                            >
+                                              {feature}
+                                            </span>
+                                          )
+                                        )}
+                                      </div>
+                                    )}
                                 </div>
                               )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteVector(metadata.id)}
-                                disabled={isDeletingVector === metadata.id}
-                                className="opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                {isDeletingVector === metadata.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin text-red-500" />
-                                ) : (
-                                  <Trash2 className="h-4 w-4 text-red-500" />
-                                )}
-                              </Button>
+
+                              {/* Features Accordion */}
+                              {metadata.features && (
+                                <Accordion
+                                  type="single"
+                                  collapsible
+                                  className="w-full"
+                                >
+                                  <AccordionItem
+                                    value="features"
+                                    className="border-white/10"
+                                  >
+                                    <AccordionTrigger className="text-sm text-white/70 hover:text-white/90 hover:no-underline">
+                                      Features
+                                    </AccordionTrigger>
+                                    <AccordionContent>
+                                      <div className="space-y-4 pt-2">
+                                        {/* Structural Features */}
+                                        {metadata.features
+                                          .structuralFeatures && (
+                                          <div className="space-y-2">
+                                            <h4 className="text-xs font-medium text-white/50">
+                                              Structural Features
+                                            </h4>
+                                            <div className="grid grid-cols-2 gap-x-12 gap-y-1">
+                                              {Object.entries(
+                                                metadata.features
+                                                  .structuralFeatures
+                                              ).map(([key, value]) => (
+                                                <div
+                                                  key={key}
+                                                  className="flex items-center justify-between py-1"
+                                                >
+                                                  <span className="text-sm text-white/60 capitalize">
+                                                    {key}
+                                                  </span>
+                                                  <span className="text-sm font-medium text-white/90">
+                                                    {typeof value === 'number'
+                                                      ? value.toFixed(2)
+                                                      : value}
+                                                  </span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        {/* Visual Features */}
+                                        {metadata.features.visualFeatures && (
+                                          <div className="space-y-2">
+                                            <h4 className="text-xs font-medium text-white/50">
+                                              Visual Features
+                                            </h4>
+                                            <div className="grid grid-cols-4 gap-1 max-h-32 overflow-y-auto">
+                                              {metadata.features.visualFeatures.map(
+                                                (value, index) => (
+                                                  <div
+                                                    key={index}
+                                                    className="text-xs text-white/60 py-0.5"
+                                                  >
+                                                    {value.toFixed(4)}
+                                                  </div>
+                                                )
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </AccordionContent>
+                                  </AccordionItem>
+                                </Accordion>
+                              )}
                             </div>
                           </div>
-
-                          {/* Additional Info */}
-                          <div className="px-4 pb-4 space-y-3">
-                            {/* Diagnosis & Key Features */}
-                            {(metadata.diagnosis || metadata.keyFeatures) && (
-                              <div className="space-y-2">
-                                {metadata.diagnosis && (
-                                  <p className="text-sm text-white/70">
-                                    {metadata.diagnosis}
-                                  </p>
-                                )}
-                                {metadata.keyFeatures &&
-                                  metadata.keyFeatures.length > 0 && (
-                                    <div className="flex flex-wrap gap-1">
-                                      {metadata.keyFeatures.map(
-                                        (feature, i) => (
-                                          <span
-                                            key={i}
-                                            className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-300"
-                                          >
-                                            {feature}
-                                          </span>
-                                        )
-                                      )}
-                                    </div>
-                                  )}
-                              </div>
-                            )}
-
-                            {/* Features Accordion */}
-                            {metadata.features && (
-                              <Accordion
-                                type="single"
-                                collapsible
-                                className="w-full"
-                              >
-                                <AccordionItem
-                                  value="features"
-                                  className="border-white/10"
-                                >
-                                  <AccordionTrigger className="text-sm text-white/70 hover:text-white/90 hover:no-underline">
-                                    Features
-                                  </AccordionTrigger>
-                                  <AccordionContent>
-                                    <div className="space-y-4 pt-2">
-                                      {/* Structural Features */}
-                                      {metadata.features.structuralFeatures && (
-                                        <div className="space-y-2">
-                                          <h4 className="text-xs font-medium text-white/50">
-                                            Structural Features
-                                          </h4>
-                                          <div className="grid grid-cols-2 gap-x-12 gap-y-1">
-                                            {Object.entries(
-                                              metadata.features
-                                                .structuralFeatures
-                                            ).map(([key, value]) => (
-                                              <div
-                                                key={key}
-                                                className="flex items-center justify-between py-1"
-                                              >
-                                                <span className="text-sm text-white/60 capitalize">
-                                                  {key}
-                                                </span>
-                                                <span className="text-sm font-medium text-white/90">
-                                                  {typeof value === 'number'
-                                                    ? value.toFixed(2)
-                                                    : value}
-                                                </span>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-
-                                      {/* Visual Features */}
-                                      {metadata.features.visualFeatures && (
-                                        <div className="space-y-2">
-                                          <h4 className="text-xs font-medium text-white/50">
-                                            Visual Features
-                                          </h4>
-                                          <div className="grid grid-cols-4 gap-1 max-h-32 overflow-y-auto">
-                                            {metadata.features.visualFeatures.map(
-                                              (value, index) => (
-                                                <div
-                                                  key={index}
-                                                  className="text-xs text-white/60 py-0.5"
-                                                >
-                                                  {value.toFixed(4)}
-                                                </div>
-                                              )
-                                            )}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </AccordionContent>
-                                </AccordionItem>
-                              </Accordion>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
                   </div>
                 </div>
               )}
