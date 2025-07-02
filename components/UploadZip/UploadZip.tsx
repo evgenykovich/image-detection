@@ -304,6 +304,12 @@ export const UploadZip = () => {
   const [isLoadingStats, setIsLoadingStats] = useState(false)
   const [isDeletingVector, setIsDeletingVector] = useState<string | null>(null)
 
+  const [isImageCategoryDialogOpen, setIsImageCategoryDialogOpen] =
+    useState(false)
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState('connector_plates')
+  const [selectedState, setSelectedState] = useState('straight')
+
   // Add fetchVectorStats function
   const fetchVectorStats = useCallback(async () => {
     if (!selectedNamespace) return
@@ -586,10 +592,52 @@ export const UploadZip = () => {
 
   const handleZipUpload = async (files: File[]) => {
     const file = files[0]
-    if (!file || !file.name.endsWith('.zip')) {
+    if (!file) {
       toast({
         title: 'Error',
-        description: 'Please upload a zip file',
+        description: 'Please upload a file',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    if (file.type.startsWith('image/')) {
+      if (!useVectorStore) {
+        // If vector store is disabled, just process the image directly
+        setZipFile(file)
+        const structure: FolderStructure = {
+          'individual-images': {
+            images: [
+              {
+                name: file.name,
+                data: file,
+              },
+            ],
+            subfolders: [],
+            prompt: '',
+            description: '',
+          },
+        }
+        setFolderStructure(structure)
+        setSelectedFolders(['individual-images'])
+        toast({
+          title: 'Success',
+          description: 'Image loaded successfully',
+          variant: 'default',
+        })
+        return
+      }
+
+      // Show category selection dialog only when vector store is enabled
+      setPendingImageFile(file)
+      setIsImageCategoryDialogOpen(true)
+      return
+    }
+
+    if (!file.name.endsWith('.zip')) {
+      toast({
+        title: 'Error',
+        description: 'Please upload a zip file or an image',
         variant: 'destructive',
       })
       return
@@ -655,14 +703,14 @@ export const UploadZip = () => {
       setFolderStructure(structure)
       toast({
         title: 'Success',
-        description: 'Zip file processed successfully',
+        description: 'File processed successfully',
         variant: 'default',
       })
     } catch (error) {
-      console.error('Error processing zip file:', error)
+      console.error('Error processing file:', error)
       toast({
         title: 'Error',
-        description: 'Error processing zip file',
+        description: 'Error processing file',
         variant: 'destructive',
       })
     } finally {
@@ -1221,6 +1269,55 @@ export const UploadZip = () => {
     }
   }
 
+  const handleImageCategoryConfirm = () => {
+    if (!pendingImageFile) return
+
+    const path = `individual-images/01-${selectedCategory}/01-${selectedState}`
+    const structure: FolderStructure = {
+      [path]: {
+        images: [
+          {
+            name: pendingImageFile.name,
+            data: pendingImageFile,
+          },
+        ],
+        subfolders: [],
+        prompt: '',
+        description: '',
+      },
+    }
+    setFolderStructure(structure)
+    setSelectedFolders([path])
+    setZipFile(pendingImageFile)
+    setPendingImageFile(null)
+    setIsImageCategoryDialogOpen(false)
+    toast({
+      title: 'Success',
+      description: 'Image loaded successfully',
+      variant: 'default',
+    })
+  }
+
+  // Add this function to get unique states for a category from vector store metadata
+  const getStatesForCategory = (category: string): string[] => {
+    if (!vectorStats?.sampleMetadata) return []
+    return Array.from(
+      new Set(
+        vectorStats.sampleMetadata
+          .filter((meta) => meta.category === category)
+          .map((meta) => meta.state)
+      )
+    )
+  }
+
+  // Add these formatting functions
+  const formatDisplayName = (name: string): string => {
+    return name
+      .split('_')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+  }
+
   return (
     <div className="w-full max-w-4xl space-y-6">
       <div className="flex items-center justify-between p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg">
@@ -1687,7 +1784,7 @@ export const UploadZip = () => {
         <DropZoneUpload
           onDrop={handleZipUpload}
           selectedFiles={zipFile ? [zipFile] : undefined}
-          accept=".zip"
+          accept=".zip,image/*"
           maxFiles={1}
         />
       )}
@@ -2518,6 +2615,71 @@ export const UploadZip = () => {
               ) : (
                 'Yes, Clear All'
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isImageCategoryDialogOpen}
+        onOpenChange={setIsImageCategoryDialogOpen}
+      >
+        <DialogContent className="sm:max-w-[425px] bg-gray-900/95 border border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-white">Image Category</DialogTitle>
+            <DialogDescription className="text-white/70">
+              Select the category and state for this image.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="category" className="text-right text-white/90">
+                Category
+              </Label>
+              <select
+                id="category"
+                value={selectedCategory}
+                onChange={(e) => {
+                  const newCategory = e.target.value
+                  setSelectedCategory(newCategory)
+                  const states = getStatesForCategory(newCategory)
+                  if (states.length > 0) {
+                    setSelectedState(states[0])
+                  }
+                }}
+                className="col-span-3 bg-white/5 border-white/10 text-white rounded-md p-2"
+              >
+                {vectorStats?.categories?.map((category) => (
+                  <option key={category} value={category}>
+                    {formatDisplayName(category)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="state" className="text-right text-white/90">
+                State
+              </Label>
+              <select
+                id="state"
+                value={selectedState}
+                onChange={(e) => setSelectedState(e.target.value)}
+                className="col-span-3 bg-white/5 border-white/10 text-white rounded-md p-2"
+              >
+                {getStatesForCategory(selectedCategory).map((state) => (
+                  <option key={state} value={state}>
+                    {formatDisplayName(state)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handleImageCategoryConfirm}
+              className="bg-blue-500/80 hover:bg-blue-500/90 text-white"
+            >
+              Confirm
             </Button>
           </DialogFooter>
         </DialogContent>
