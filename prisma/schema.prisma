@@ -7,12 +7,14 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
+  engineType      = "binary"
 }
 
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
   extensions = [pgvector(map: "vector")]
+  relationMode = "prisma"
 }
 
 // Enable Prisma's connection pool specifically for serverless
