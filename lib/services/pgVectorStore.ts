@@ -119,6 +119,7 @@ export class PgVectorStore implements VectorStore {
         create: {
           id: namespace,
           name: namespace,
+          updatedAt: new Date(),
         },
       })
 
@@ -231,9 +232,7 @@ export class PgVectorStore implements VectorStore {
   async clearNamespace(namespace: string): Promise<void> {
     await prisma.vector.deleteMany({
       where: {
-        namespace: {
-          id: namespace,
-        },
+        namespaceId: namespace,
       },
     })
   }
@@ -244,9 +243,7 @@ export class PgVectorStore implements VectorStore {
   }> {
     const vectors = await prisma.vector.findMany({
       where: {
-        namespace: {
-          name: namespace,
-        },
+        namespaceId: namespace,
       },
       select: {
         metadata: true,
@@ -296,6 +293,7 @@ export class PgVectorStore implements VectorStore {
       create: {
         id: namespace,
         name: namespace,
+        updatedAt: new Date(),
       },
     })
 
