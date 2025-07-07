@@ -1,0 +1,32 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+  engineType      = "binary"
+}
+
+datasource db {
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
+  extensions   = [uuid_ossp(map: "uuid-ossp", schema: "extensions"), vector]
+}
+
+model Namespace {
+  id        String   @id
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model Vector {
+  id          String                @id
+  embedding   Unsupported("vector")
+  metadata    Json
+  namespaceId String
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime
+
+  @@index([embedding])
+  @@index([namespaceId])
+}

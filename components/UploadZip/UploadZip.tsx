@@ -25,8 +25,51 @@ import Image from 'next/image'
 import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import { DropZoneUpload } from '../DropZoneUpload'
-import { Download, Folder, ChevronDown, Loader2, Check } from 'lucide-react'
+import {
+  Download,
+  Folder,
+  ChevronDown,
+  Loader2,
+  Check,
+  Trash2,
+} from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+
+interface VectorStoreStats {
+  namespace: string
+  totalVectors: number
+  categories: string[]
+  lastUpdated: string | null
+  created: string | null
+  sampleMetadata: {
+    id: string
+    category: string
+    state: string
+    confidence: number
+    createdAt: string
+    features?: {
+      structuralFeatures: {
+        edges: number
+        contrast: number
+        sharpness: number
+        brightness: number
+      }
+      metadata?: {
+        format: string
+        size: number
+        dimensions: {
+          width: number
+          height: number
+        }
+      }
+      visualFeatures?: number[]
+    }
+    diagnosis?: string
+    keyFeatures?: string[]
+    prompt?: string
+  }[]
+}
 
 interface ValidationResponse {
   isValid: boolean
@@ -257,6 +300,41 @@ export const UploadZip = () => {
     []
   )
 
+  const [vectorStats, setVectorStats] = useState<VectorStoreStats | null>(null)
+  const [isLoadingStats, setIsLoadingStats] = useState(false)
+  const [isDeletingVector, setIsDeletingVector] = useState<string | null>(null)
+
+  const [isImageCategoryDialogOpen, setIsImageCategoryDialogOpen] =
+    useState(false)
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState('connector_plates')
+  const [selectedState, setSelectedState] = useState('straight')
+
+  // Add fetchVectorStats function
+  const fetchVectorStats = useCallback(async () => {
+    if (!selectedNamespace) return
+
+    try {
+      setIsLoadingStats(true)
+      const response = await fetch(
+        `/api/vector-stats?namespace=${selectedNamespace}`
+      )
+      if (!response.ok) throw new Error('Failed to fetch vector store stats')
+      const data = await response.json()
+      setVectorStats(data)
+    } catch (error) {
+      console.error('Error fetching vector store stats:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch vector store statistics',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsLoadingStats(false)
+    }
+  }, [selectedNamespace, toast])
+
+  // Update loadNamespaces to also fetch stats
   const loadNamespaces = useCallback(async () => {
     try {
       const response = await fetch('/api/namespaces')
@@ -268,15 +346,62 @@ export const UploadZip = () => {
       if (data.namespaces.length > 0 && !selectedNamespace) {
         setSelectedNamespace(data.namespaces[0].id)
       }
+
+      // Fetch stats for the selected namespace
+      if (selectedNamespace) {
+        await fetchVectorStats()
+      }
     } catch (error) {
       console.error('Error loading namespaces:', error)
     }
-  }, [selectedNamespace])
+  }, [selectedNamespace, fetchVectorStats])
+
+  // Add effect to fetch stats when namespace changes
+  useEffect(() => {
+    if (selectedNamespace) {
+      fetchVectorStats()
+    }
+  }, [selectedNamespace, fetchVectorStats])
 
   // Load namespaces on component mount
   useEffect(() => {
     loadNamespaces()
   }, [loadNamespaces])
+
+  // Update handleClearVectorStore to refresh stats
+  const handleClearVectorStore = async () => {
+    if (!selectedNamespace) return
+
+    try {
+      setIsClearingVectorStore(true)
+      const response = await fetch('/api/clear-vector-store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace: selectedNamespace }),
+      })
+
+      if (!response.ok) throw new Error('Failed to clear vector store')
+
+      toast({
+        title: 'Success',
+        description: 'Vector store cleared successfully',
+        variant: 'default',
+      })
+
+      // Refresh stats after clearing
+      await fetchVectorStats()
+    } catch (error) {
+      console.error('Error clearing vector store:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to clear vector store',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsClearingVectorStore(false)
+      setIsClearConfirmOpen(false)
+    }
+  }
 
   const handleAddNamespace = async () => {
     try {
@@ -305,37 +430,6 @@ export const UploadZip = () => {
         variant: 'destructive',
       })
       setIsAddingNamespace(false)
-    }
-  }
-
-  const handleClearVectorStore = async () => {
-    if (!selectedNamespace) return
-
-    try {
-      setIsClearingVectorStore(true)
-      const response = await fetch('/api/clear-vector-store', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ namespace: selectedNamespace }),
-      })
-
-      if (!response.ok) throw new Error('Failed to clear vector store')
-
-      toast({
-        title: 'Success',
-        description: 'Vector store cleared successfully',
-        variant: 'default',
-      })
-    } catch (error) {
-      console.error('Error clearing vector store:', error)
-      toast({
-        title: 'Error',
-        description: 'Failed to clear vector store',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsClearingVectorStore(false)
-      setIsClearConfirmOpen(false)
     }
   }
 
@@ -498,10 +592,52 @@ export const UploadZip = () => {
 
   const handleZipUpload = async (files: File[]) => {
     const file = files[0]
-    if (!file || !file.name.endsWith('.zip')) {
+    if (!file) {
       toast({
         title: 'Error',
-        description: 'Please upload a zip file',
+        description: 'Please upload a file',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    if (file.type.startsWith('image/')) {
+      if (!useVectorStore) {
+        // If vector store is disabled, just process the image directly
+        setZipFile(file)
+        const structure: FolderStructure = {
+          'individual-images': {
+            images: [
+              {
+                name: file.name,
+                data: file,
+              },
+            ],
+            subfolders: [],
+            prompt: '',
+            description: '',
+          },
+        }
+        setFolderStructure(structure)
+        setSelectedFolders(['individual-images'])
+        toast({
+          title: 'Success',
+          description: 'Image loaded successfully',
+          variant: 'default',
+        })
+        return
+      }
+
+      // Show category selection dialog only when vector store is enabled
+      setPendingImageFile(file)
+      setIsImageCategoryDialogOpen(true)
+      return
+    }
+
+    if (!file.name.endsWith('.zip')) {
+      toast({
+        title: 'Error',
+        description: 'Please upload a zip file or an image',
         variant: 'destructive',
       })
       return
@@ -567,14 +703,14 @@ export const UploadZip = () => {
       setFolderStructure(structure)
       toast({
         title: 'Success',
-        description: 'Zip file processed successfully',
+        description: 'File processed successfully',
         variant: 'default',
       })
     } catch (error) {
-      console.error('Error processing zip file:', error)
+      console.error('Error processing file:', error)
       toast({
         title: 'Error',
-        description: 'Error processing zip file',
+        description: 'Error processing file',
         variant: 'destructive',
       })
     } finally {
@@ -599,22 +735,41 @@ export const UploadZip = () => {
   }
 
   const handleValidate = async () => {
-    if (selectedFolders.length === 0) return
-
-    // Check if any selected folders are missing prompts
-    const foldersWithoutPrompts = selectedFolders.filter(
-      (folder) => !folderStructure[folder].prompt
-    )
-
-    if (foldersWithoutPrompts.length > 0) {
-      setFoldersNeedingPrompts(foldersWithoutPrompts)
-      setCurrentEditingFolder(foldersWithoutPrompts[0])
-      setIsPromptDialogOpen(true)
+    if (!selectedFolders.length) {
+      toast({
+        title: 'Error',
+        description: 'Please select at least one folder to validate',
+        variant: 'destructive',
+      })
       return
     }
 
-    // Proceed with validation if all folders have prompts
-    await processValidation()
+    if (validationMode === 'training' && !selectedNamespace) {
+      toast({
+        title: 'Error',
+        description: 'Please select a namespace for storing training examples',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsProcessing(true)
+    setProgress(0)
+    setProcessedFiles(0)
+    setResults([])
+
+    try {
+      await processValidation()
+    } catch (error) {
+      console.error('Error during validation:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to validate images',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   const processValidation = async () => {
@@ -1077,6 +1232,92 @@ export const UploadZip = () => {
     })
   }
 
+  // Add this function after the other API-related functions
+  const handleDeleteVector = async (vectorId: string) => {
+    if (!selectedNamespace) return
+
+    try {
+      setIsDeletingVector(vectorId)
+      const response = await fetch('/api/vectors', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          namespace: selectedNamespace,
+          vectorId: vectorId,
+        }),
+      })
+
+      if (!response.ok) throw new Error('Failed to delete vector')
+
+      toast({
+        title: 'Success',
+        description: 'Vector deleted successfully',
+        variant: 'default',
+      })
+
+      // Refresh stats after deletion
+      await fetchVectorStats()
+    } catch (error) {
+      console.error('Error deleting vector:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to delete vector',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsDeletingVector(null)
+    }
+  }
+
+  const handleImageCategoryConfirm = () => {
+    if (!pendingImageFile) return
+
+    const path = `individual-images/01-${selectedCategory}/01-${selectedState}`
+    const structure: FolderStructure = {
+      [path]: {
+        images: [
+          {
+            name: pendingImageFile.name,
+            data: pendingImageFile,
+          },
+        ],
+        subfolders: [],
+        prompt: '',
+        description: '',
+      },
+    }
+    setFolderStructure(structure)
+    setSelectedFolders([path])
+    setZipFile(pendingImageFile)
+    setPendingImageFile(null)
+    setIsImageCategoryDialogOpen(false)
+    toast({
+      title: 'Success',
+      description: 'Image loaded successfully',
+      variant: 'default',
+    })
+  }
+
+  // Add this function to get unique states for a category from vector store metadata
+  const getStatesForCategory = (category: string): string[] => {
+    if (!vectorStats?.sampleMetadata) return []
+    return Array.from(
+      new Set(
+        vectorStats.sampleMetadata
+          .filter((meta) => meta.category === category)
+          .map((meta) => meta.state)
+      )
+    )
+  }
+
+  // Add these formatting functions
+  const formatDisplayName = (name: string): string => {
+    return name
+      .split('_')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+  }
+
   return (
     <div className="w-full max-w-4xl space-y-6">
       <div className="flex items-center justify-between p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg">
@@ -1104,190 +1345,393 @@ export const UploadZip = () => {
         </div>
       </div>
 
-      {/* Validation Settings Panel */}
-      <div className="p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-xl font-semibold text-white flex items-center gap-2">
+      {/* Enhanced Validation Section */}
+      <div className="space-y-6">
+        <Tabs defaultValue="validation" className="w-full">
+          <TabsList className="w-full">
+            <TabsTrigger value="validation" className="flex-1">
               Validation Settings
-              <span className="text-xs font-normal px-2 py-1 rounded-full bg-blue-500/20 text-blue-300">
-                Beta
-              </span>
-            </h3>
-            <p className="text-sm text-white/80">
-              Configure how images are validated and processed
-            </p>
-          </div>
-        </div>
-
-        {/* Customer Namespace Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-          <div className="space-y-2">
-            <Label className="text-white">Customer Namespace</Label>
-            <div className="flex gap-2">
-              <select
-                value={selectedNamespace}
-                onChange={(e) => setSelectedNamespace(e.target.value)}
-                className="flex-1 bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
-                disabled={isProcessing}
-              >
-                <option value="" className="bg-gray-800">
-                  Select a customer...
-                </option>
-                {availableNamespaces.map((ns) => (
-                  <option key={ns.id} value={ns.id} className="bg-gray-800">
-                    {ns.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-white">Add New Customer</Label>
-            <div className="flex gap-2">
-              <Input
-                value={newNamespaceName}
-                onChange={(e) => setNewNamespaceName(e.target.value)}
-                placeholder="Enter customer name"
-                className="flex-1 bg-white/5 border-white/10 text-white placeholder:text-white/40"
-                disabled={isAddingNamespace}
-              />
-              <Button
-                onClick={handleAddNamespace}
-                disabled={!newNamespaceName || isAddingNamespace}
-                className="bg-blue-500/80 hover:bg-blue-500/90 text-white"
-              >
-                {isAddingNamespace ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Adding...
-                  </>
-                ) : (
-                  'Add'
-                )}
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between mt-4">
-          <div></div>
-          <Button
-            onClick={() => setIsClearConfirmOpen(true)}
-            disabled={isClearingVectorStore || !selectedNamespace}
-            variant="outline"
-            className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/30"
-          >
-            {isClearingVectorStore ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Clearing...
-              </>
-            ) : (
-              'Clear Vector Store'
-            )}
-          </Button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Mode Selection */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-white/90">Mode</label>
-            <select
-              value={validationMode}
-              onChange={(e) =>
-                setValidationMode(e.target.value as 'training' | 'validation')
-              }
-              className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
-              disabled={isProcessing}
-            >
-              <option value="validation" className="text-black">
-                Validation Mode
-              </option>
-              <option value="training" className="text-black">
-                Tuning Mode
-              </option>
-            </select>
-            <p className="text-xs text-white/60">
-              {validationMode === 'training'
-                ? 'Store images as ground truth examples'
-                : 'Validate images against existing examples'}
-            </p>
-          </div>
-
-          {/* Model Selection */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-white/90">Model</label>
-            <select
-              value={useGemini ? 'gemini' : 'openai'}
-              onChange={(e) => setUseGemini(e.target.value === 'gemini')}
-              className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
-              disabled={isProcessing}
-            >
-              <option value="openai" className="text-black">
-                OpenAI GPT-4 Vision
-              </option>
-              <option value="gemini" className="text-black">
-                Google Gemini
-              </option>
-            </select>
-            <p className="text-xs text-white/60">
-              {useGemini
-                ? 'Using Google Gemini model for image analysis'
-                : 'Using OpenAI GPT-4 Vision for image analysis'}
-            </p>
-          </div>
-
-          {/* Vector Store Toggle */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-white/90">
-                Vector Store
-              </label>
-              <Switch
-                checked={useVectorStore}
-                onCheckedChange={setUseVectorStore}
-                disabled={isProcessing || validationMode === 'training'}
-              />
-            </div>
-            <p className="text-xs text-white/60">
-              Compare with similar examples
-            </p>
-          </div>
-        </div>
-
-        {validationMode === 'training' && (
-          <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
-            <div className="flex items-start gap-3">
-              <div className="p-1.5 bg-yellow-500/20 rounded-full">
-                <svg
-                  className="w-4 h-4 text-yellow-500"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-              </div>
-              <div>
-                <h4 className="text-sm font-medium text-yellow-500">
-                  Training Mode Active
-                </h4>
-                <p className="text-xs text-white/60">
-                  Images will be stored as ground truth examples with maximum
-                  confidence. Use this mode only for validated, correct
-                  examples.
+            </TabsTrigger>
+            <TabsTrigger value="vectors" className="flex-1">
+              Vector Store
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="validation">
+            <div className="p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg">
+              <div className="space-y-2">
+                <h3 className="text-xl font-semibold text-white">
+                  Validation Settings
+                </h3>
+                <p className="text-sm text-white/70">
+                  Configure how images are validated and processed.
                 </p>
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                {/* Mode Selection */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-white/90">
+                    Mode
+                  </label>
+                  <select
+                    value={validationMode}
+                    onChange={(e) => {
+                      const newMode = e.target.value as
+                        | 'training'
+                        | 'validation'
+                      setValidationMode(newMode)
+                      // Always enable vector store in training mode
+                      if (newMode === 'training') {
+                        setUseVectorStore(true)
+                      }
+                    }}
+                    className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
+                    disabled={isProcessing}
+                  >
+                    <option value="validation" className="text-black">
+                      Validation Mode
+                    </option>
+                    <option value="training" className="text-black">
+                      Tuning Mode
+                    </option>
+                  </select>
+                  <p className="text-xs text-white/60">
+                    {validationMode === 'training'
+                      ? 'Store images as ground truth examples'
+                      : 'Validate images against existing examples'}
+                  </p>
+                </div>
+
+                {/* Model Selection */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-white/90">
+                    Model
+                  </label>
+                  <select
+                    value={useGemini ? 'gemini' : 'openai'}
+                    onChange={(e) => setUseGemini(e.target.value === 'gemini')}
+                    className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-white"
+                    disabled={isProcessing}
+                  >
+                    <option value="openai" className="text-black">
+                      OpenAI GPT-4 Vision
+                    </option>
+                    <option value="gemini" className="text-black">
+                      Google Gemini
+                    </option>
+                  </select>
+                  <p className="text-xs text-white/60">
+                    {useGemini
+                      ? 'Using Google Gemini model for image analysis'
+                      : 'Using OpenAI GPT-4 Vision for image analysis'}
+                  </p>
+                </div>
+
+                {/* Vector Store Toggle */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-white/90">
+                      Vector Store
+                    </label>
+                    <Switch
+                      checked={useVectorStore}
+                      onCheckedChange={setUseVectorStore}
+                      disabled={isProcessing || validationMode === 'training'}
+                    />
+                  </div>
+                  <p className="text-xs text-white/60">
+                    {validationMode === 'training'
+                      ? 'Always enabled in training mode'
+                      : 'Compare with similar examples'}
+                  </p>
+                </div>
+              </div>
+
+              {validationMode === 'training' && (
+                <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
+                  <div className="flex items-start gap-3">
+                    <div className="p-1.5 bg-yellow-500/20 rounded-full">
+                      <svg
+                        className="w-4 h-4 text-yellow-500"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        />
+                      </svg>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-yellow-500">
+                        Training Mode Active
+                      </h4>
+                      <p className="text-xs text-white/60">
+                        Images will be stored as ground truth examples in the
+                        selected namespace with maximum confidence. Use this
+                        mode only for validated, correct examples.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          </TabsContent>
+          <TabsContent value="vectors">
+            <div className="p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20 shadow-lg">
+              <div className="space-y-2">
+                <h3 className="text-xl font-semibold text-white">
+                  Vector Store Management
+                </h3>
+                <p className="text-sm text-white/70">
+                  View and manage stored vectors.
+                </p>
+              </div>
+
+              {/* Vector Store Stats */}
+              {vectorStats && (
+                <div className="mt-6 space-y-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className="p-4 bg-white/5 rounded-lg">
+                      <div className="text-sm text-white/70">Total Vectors</div>
+                      <div className="text-2xl font-semibold text-white">
+                        {vectorStats?.totalVectors || 0}
+                      </div>
+                    </div>
+                    <div className="p-4 bg-white/5 rounded-lg">
+                      <div className="text-sm text-white/70">Categories</div>
+                      <div className="text-2xl font-semibold text-white">
+                        {vectorStats?.categories?.length || 0}
+                      </div>
+                    </div>
+                    <div className="p-4 bg-white/5 rounded-lg">
+                      <div className="text-sm text-white/70">Last Updated</div>
+                      <div className="text-2xl font-semibold text-white">
+                        {vectorStats.lastUpdated
+                          ? new Date(
+                              vectorStats.lastUpdated
+                            ).toLocaleDateString()
+                          : 'Never'}
+                      </div>
+                    </div>
+                    <div className="p-4 bg-white/5 rounded-lg">
+                      <div className="text-sm text-white/70">Created</div>
+                      <div className="text-2xl font-semibold text-white">
+                        {vectorStats.created
+                          ? new Date(vectorStats.created).toLocaleDateString()
+                          : 'Unknown'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sample Vectors */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-lg font-medium text-white">
+                        Sample Vectors
+                      </h4>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleClearVectorStore}
+                        disabled={isLoadingStats}
+                        className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/30"
+                      >
+                        Clear Vector Store
+                      </Button>
+                    </div>
+
+                    <ScrollArea className="h-[400px] rounded-lg border border-white/10">
+                      <div className="space-y-2 p-4">
+                        {vectorStats?.sampleMetadata?.map((metadata, idx) => (
+                          <div
+                            key={idx}
+                            className={`
+                          group flex flex-col
+                          rounded-lg transition-all duration-200
+                          ${
+                            isDeletingVector === metadata.id
+                              ? 'bg-red-500/20 border-red-500/30'
+                              : 'bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20'
+                          }
+                        `}
+                          >
+                            {/* Main Info Row */}
+                            <div className="flex items-center justify-between p-4">
+                              <div className="flex items-center space-x-4">
+                                <div className="flex flex-col space-y-1">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                                    <span className="text-sm font-medium text-white/90">
+                                      {metadata.category}
+                                    </span>
+                                    <span className="px-2 py-0.5 text-xs rounded-full bg-white/10 text-white/70">
+                                      {metadata.state}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center space-x-2 text-xs text-white/50">
+                                    <span>
+                                      ID: {(metadata.id || '').substring(0, 8)}
+                                      ...
+                                    </span>
+                                    <span>•</span>
+                                    <span>
+                                      {new Date(
+                                        metadata.createdAt
+                                      ).toLocaleDateString()}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                {metadata.confidence && (
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full bg-blue-500 transition-all duration-300"
+                                        style={{
+                                          width: `${
+                                            metadata.confidence * 100
+                                          }%`,
+                                        }}
+                                      />
+                                    </div>
+                                    <span className="text-xs text-white/50">
+                                      {(metadata.confidence * 100).toFixed(1)}%
+                                    </span>
+                                  </div>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() =>
+                                    handleDeleteVector(metadata.id)
+                                  }
+                                  disabled={isDeletingVector === metadata.id}
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  {isDeletingVector === metadata.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin text-red-500" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
+
+                            {/* Additional Info */}
+                            <div className="px-4 pb-4 space-y-3">
+                              {/* Diagnosis & Key Features */}
+                              {(metadata.diagnosis || metadata.keyFeatures) && (
+                                <div className="space-y-2">
+                                  {metadata.diagnosis && (
+                                    <p className="text-sm text-white/70">
+                                      {metadata.diagnosis}
+                                    </p>
+                                  )}
+                                  {metadata.keyFeatures &&
+                                    metadata.keyFeatures.length > 0 && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {metadata.keyFeatures.map(
+                                          (feature, i) => (
+                                            <span
+                                              key={i}
+                                              className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-300"
+                                            >
+                                              {feature}
+                                            </span>
+                                          )
+                                        )}
+                                      </div>
+                                    )}
+                                </div>
+                              )}
+
+                              {/* Features Accordion */}
+                              {metadata.features && (
+                                <Accordion
+                                  type="single"
+                                  collapsible
+                                  className="w-full"
+                                >
+                                  <AccordionItem
+                                    value="features"
+                                    className="border-white/10"
+                                  >
+                                    <AccordionTrigger className="text-sm text-white/70 hover:text-white/90 hover:no-underline">
+                                      Features
+                                    </AccordionTrigger>
+                                    <AccordionContent>
+                                      <div className="space-y-4 pt-2">
+                                        {/* Structural Features */}
+                                        {metadata.features
+                                          .structuralFeatures && (
+                                          <div className="space-y-2">
+                                            <h4 className="text-xs font-medium text-white/50">
+                                              Structural Features
+                                            </h4>
+                                            <div className="grid grid-cols-2 gap-x-12 gap-y-1">
+                                              {Object.entries(
+                                                metadata.features
+                                                  .structuralFeatures
+                                              ).map(([key, value]) => (
+                                                <div
+                                                  key={key}
+                                                  className="flex items-center justify-between py-1"
+                                                >
+                                                  <span className="text-sm text-white/60 capitalize">
+                                                    {key}
+                                                  </span>
+                                                  <span className="text-sm font-medium text-white/90">
+                                                    {typeof value === 'number'
+                                                      ? value.toFixed(2)
+                                                      : value}
+                                                  </span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        {/* Visual Features */}
+                                        {metadata.features.visualFeatures && (
+                                          <div className="space-y-2">
+                                            <h4 className="text-xs font-medium text-white/50">
+                                              Visual Features
+                                            </h4>
+                                            <div className="grid grid-cols-4 gap-1 max-h-32 overflow-y-auto">
+                                              {metadata.features.visualFeatures.map(
+                                                (value, index) => (
+                                                  <div
+                                                    key={index}
+                                                    className="text-xs text-white/60 py-0.5"
+                                                  >
+                                                    {value.toFixed(4)}
+                                                  </div>
+                                                )
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </AccordionContent>
+                                  </AccordionItem>
+                                </Accordion>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                </div>
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
 
       {(progress > 0 || isExtracting) && !isProcessing && (
@@ -1340,7 +1784,7 @@ export const UploadZip = () => {
         <DropZoneUpload
           onDrop={handleZipUpload}
           selectedFiles={zipFile ? [zipFile] : undefined}
-          accept=".zip"
+          accept=".zip,image/*"
           maxFiles={1}
         />
       )}
@@ -2024,18 +2468,18 @@ export const UploadZip = () => {
 
             {/* Suggested Prompts Section */}
             {currentEditingFolder &&
-              folderStructure?.[currentEditingFolder]?.suggestedPrompts &&
-              folderStructure?.[currentEditingFolder]?.suggestedPrompts.length >
-                0 && (
+              (folderStructure?.[currentEditingFolder]?.suggestedPrompts ?? [])
+                .length > 0 && (
                 <div className="mt-4">
                   <Label className="text-white/90 mb-2">
                     Suggested Prompts
                   </Label>
                   <ScrollArea className="h-[200px] w-full rounded-md border border-white/10">
                     <div className="p-4 space-y-2">
-                      {folderStructure?.[
-                        currentEditingFolder
-                      ]?.suggestedPrompts?.map((prompt, index) => (
+                      {(
+                        folderStructure?.[currentEditingFolder]
+                          ?.suggestedPrompts ?? []
+                      ).map((prompt, index) => (
                         <div
                           key={index}
                           className={`p-3 rounded-lg cursor-pointer transition-colors ${
@@ -2171,6 +2615,71 @@ export const UploadZip = () => {
               ) : (
                 'Yes, Clear All'
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isImageCategoryDialogOpen}
+        onOpenChange={setIsImageCategoryDialogOpen}
+      >
+        <DialogContent className="sm:max-w-[425px] bg-gray-900/95 border border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-white">Image Category</DialogTitle>
+            <DialogDescription className="text-white/70">
+              Select the category and state for this image.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="category" className="text-right text-white/90">
+                Category
+              </Label>
+              <select
+                id="category"
+                value={selectedCategory}
+                onChange={(e) => {
+                  const newCategory = e.target.value
+                  setSelectedCategory(newCategory)
+                  const states = getStatesForCategory(newCategory)
+                  if (states.length > 0) {
+                    setSelectedState(states[0])
+                  }
+                }}
+                className="col-span-3 bg-white/5 border-white/10 text-white rounded-md p-2"
+              >
+                {vectorStats?.categories?.map((category) => (
+                  <option key={category} value={category}>
+                    {formatDisplayName(category)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="state" className="text-right text-white/90">
+                State
+              </Label>
+              <select
+                id="state"
+                value={selectedState}
+                onChange={(e) => setSelectedState(e.target.value)}
+                className="col-span-3 bg-white/5 border-white/10 text-white rounded-md p-2"
+              >
+                {getStatesForCategory(selectedCategory).map((state) => (
+                  <option key={state} value={state}>
+                    {formatDisplayName(state)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handleImageCategoryConfirm}
+              className="bg-blue-500/80 hover:bg-blue-500/90 text-white"
+            >
+              Confirm
             </Button>
           </DialogFooter>
         </DialogContent>

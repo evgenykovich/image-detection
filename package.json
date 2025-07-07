@@ -4,9 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "prisma generate",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "prisma:push": "prisma db push",
+    "services:up": "docker compose up -d",
+    "services:down": "docker compose down"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.21.1",
@@ -22,8 +29,11 @@
     "@radix-ui/react-select": "^2.1.1",
     "@radix-ui/react-slot": "^1.0.2",
     "@radix-ui/react-switch": "^1.2.5",
+    "@radix-ui/react-tabs": "^1.1.12",
     "@radix-ui/react-toast": "^1.1.5",
     "@types/jszip": "^3.4.1",
+    "@types/lodash": "^4.17.18",
+    "@types/pg": "^8.15.4",
     "@types/xlsx": "^0.0.36",
     "aws-sdk": "^2.1629.0",
     "cheerio": "^1.0.0",
@@ -32,10 +42,12 @@
     "jotai": "^2.8.1",
     "jszip": "^3.10.1",
     "langchain": "^0.0.150",
+    "lodash": "^4.17.21",
     "lucide-react": "^0.378.0",
     "next": "14.2.3",
     "openai": "^4.19.0",
     "pdf-parse": "^1.1.1",
+    "pg": "^8.16.0",
     "primereact": "^10.6.5",
     "react": "^18",
     "react-dom": "^18",
@@ -46,6 +58,7 @@
     "zod": "^3.25.21"
   },
   "devDependencies": {
+    "@prisma/client": "^6.10.0",
     "@types/formidable": "^3.4.5",
     "@types/node": "^20",
     "@types/pdf-parse": "^1.1.4",
@@ -55,6 +68,7 @@
     "eslint-config-next": "14.2.3",
     "ignore-loader": "^0.1.2",
     "postcss": "^8",
+    "prisma": "^6.10.0",
     "tailwindcss": "^3.4.1",
     "typescript": "^5"
   }

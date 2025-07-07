@@ -7,9 +7,10 @@ import {
   State,
   ValidationDiagnosis,
   Characteristics,
+  SimilarCase,
 } from '@/types/validation'
 import { extractImageFeatures } from './featureExtraction'
-import { findSimilarCases, storeValidationCase } from './vectorStorage'
+import { vectorStore } from './vectorStorage'
 import {
   buildSchemaForCategory,
   buildPromptFromCategory,
@@ -210,7 +211,14 @@ export async function validateImage(
       }
 
       try {
-        await storeValidationCase(
+        console.log('Attempting to store ground truth case:', {
+          category,
+          expectedState,
+          namespace: options.namespace,
+          hasFeatures: !!features,
+          hasBuffer: !!imageBuffer,
+        })
+        await vectorStore.storeValidationCase(
           `data:image/jpeg;base64,${imageBuffer.toString('base64')}`,
           category,
           expectedState,
@@ -221,8 +229,9 @@ export async function validateImage(
           options.prompt,
           options.namespace
         )
+        console.log('Successfully stored ground truth case')
       } catch (error) {
-        console.warn('Failed to store ground truth case:', error)
+        console.error('Failed to store ground truth case:', error)
       }
 
       return groundTruthResult
@@ -293,7 +302,7 @@ export async function validateImage(
     if (options.useVectorStore) {
       console.log('Vector store enabled, searching for similar cases...')
       try {
-        const similarCases = await findSimilarCases(
+        const similarCases = await vectorStore.findSimilarCases(
           features,
           category,
           5, // Default limit
@@ -301,7 +310,7 @@ export async function validateImage(
         )
         console.log('Found similar cases:', {
           count: similarCases.length,
-          cases: similarCases.map((c) => ({
+          cases: similarCases.map((c: SimilarCase) => ({
             category: c.category,
             state: c.state,
             confidence: c.confidence,
@@ -312,22 +321,25 @@ export async function validateImage(
 
         // Adjust confidence based on similar cases if we have high confidence matches
         const highConfidenceCases = similarCases.filter(
-          (c) => c.confidence > 0.8
+          (c: SimilarCase) => c.confidence > 0.8
         )
 
         if (highConfidenceCases.length > 0) {
           console.log('Found high confidence matches:', {
             count: highConfidenceCases.length,
-            confidences: highConfidenceCases.map((c) => c.confidence),
+            confidences: highConfidenceCases.map(
+              (c: SimilarCase) => c.confidence
+            ),
           })
 
           const totalWeight = highConfidenceCases.reduce(
-            (sum, c) => sum + c.confidence,
+            (sum: number, c: SimilarCase) => sum + c.confidence,
             0
           )
           const weightedConfidence =
             highConfidenceCases.reduce(
-              (sum, c) => sum + c.confidence * c.confidence,
+              (sum: number, c: SimilarCase) =>
+                sum + c.confidence * c.confidence,
               0
             ) / totalWeight
 
