@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/services/prismaService'
+import { randomUUID } from 'crypto'
 
 export async function GET() {
   try {
@@ -45,7 +46,11 @@ export async function POST(request: Request) {
     // If namespace doesn't exist, create it
     if (!namespace) {
       namespace = await prisma.namespace.create({
-        data: { name },
+        data: {
+          id: randomUUID(),
+          name,
+          updatedAt: new Date(),
+        },
         select: {
           id: true,
           name: true,
