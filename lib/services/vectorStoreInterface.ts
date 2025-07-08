@@ -19,7 +19,16 @@ export interface VectorStore {
     namespace?: string
   ): Promise<SimilarCase[]>
 
+  /**
+   * Find similar cases using CLIP visual features
+   * @param imageUrl URL of the image to compare
+   * @param features Image features including visual CLIP embeddings
+   * @param category Category to filter by
+   * @param limit Maximum number of results to return
+   * @param namespace Namespace to search in
+   */
   findSimilarCases(
+    imageUrl: string,
     features: ImageFeatures,
     category: Category,
     limit?: number,

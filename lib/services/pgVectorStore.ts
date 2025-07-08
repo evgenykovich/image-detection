@@ -10,6 +10,7 @@ import {
 import { prisma } from './prismaService'
 import { Prisma } from '@prisma/client'
 import { randomUUID } from 'crypto'
+import { createClipEmbedding } from '@/util/clip'
 
 // Define the expected metadata structure
 interface VectorMetadata {
@@ -29,20 +30,28 @@ const openai = new OpenAI({
 
 // Helper to generate description for embedding
 function generateDescription(features: ImageFeatures): string {
-  const { structuralFeatures, metadata } = features
+  const { structuralFeatures, metadata, semanticFeatures } = features
   return `Image Analysis:
-Format: ${metadata.format}, Size: ${metadata.dimensions.width}x${metadata.dimensions.height}
+Semantic Content: ${semanticFeatures || 'No semantic content detected'}
+Format: ${metadata.format}, Size: ${metadata.dimensions.width}x${
+    metadata.dimensions.height
+  }
 Edges: ${structuralFeatures.edges}
 Contrast: ${structuralFeatures.contrast}
 Brightness: ${structuralFeatures.brightness}
 Sharpness: ${structuralFeatures.sharpness}`
 }
 
+// Type assertion function to convert any object to JsonObject
+function asJsonObject(obj: any): Prisma.JsonObject {
+  return obj as Prisma.JsonObject
+}
+
 // Helper to convert diagnosis to a Prisma JSON object
 function diagnosisToJsonObject(
   diagnosis: ValidationDiagnosis
 ): Prisma.JsonObject {
-  return {
+  const obj = {
     overall_assessment: diagnosis.overall_assessment,
     confidence_level: diagnosis.confidence_level,
     key_observations: diagnosis.key_observations,
@@ -50,6 +59,7 @@ function diagnosisToJsonObject(
     failed_criteria: diagnosis.failed_criteria,
     detailed_explanation: diagnosis.detailed_explanation,
   }
+  return asJsonObject(obj)
 }
 
 // Helper to convert JSON object to diagnosis
@@ -67,6 +77,28 @@ function jsonObjectToDiagnosis(obj: Prisma.JsonObject): ValidationDiagnosis {
       ? obj.failed_criteria.map(String)
       : [],
     detailed_explanation: String(obj.detailed_explanation || ''),
+  }
+}
+
+// Helper to get CLIP embeddings for an image
+async function getClipEmbeddings(imageUrl: string): Promise<number[]> {
+  try {
+    // If it's a data URL, convert it to a buffer
+    let imageBuffer: Buffer
+    if (imageUrl.startsWith('data:')) {
+      const base64Data = imageUrl.split(',')[1]
+      imageBuffer = Buffer.from(base64Data, 'base64')
+    } else {
+      // Fetch the image if it's a regular URL
+      const response = await fetch(imageUrl)
+      imageBuffer = Buffer.from(await response.arrayBuffer())
+    }
+
+    // Get CLIP embeddings
+    return await createClipEmbedding(imageBuffer)
+  } catch (error) {
+    console.error('Failed to get CLIP embeddings:', error)
+    throw error
   }
 }
 
@@ -90,13 +122,8 @@ export class PgVectorStore implements VectorStore {
       confidence,
     })
 
-    // Get embeddings for the image features
-    const response = await openai.embeddings.create({
-      model: 'text-embedding-ada-002',
-      input: generateDescription(features),
-      encoding_format: 'float',
-    })
-    const vector = response.data[0].embedding
+    // Get embeddings using CLIP
+    const vector = await getClipEmbeddings(imageUrl)
 
     // Prepare metadata
     const metadata: VectorMetadata = {
@@ -151,89 +178,97 @@ export class PgVectorStore implements VectorStore {
     }
 
     // Return similar cases
-    return this.findSimilarCases(features, category, 5, namespace)
+    return this.findSimilarCases(imageUrl, features, category, 5, namespace)
   }
 
   async findSimilarCases(
+    imageUrl: string,
     features: ImageFeatures,
     category: Category,
     limit: number = 5,
     namespace: string = '_default_'
   ): Promise<SimilarCase[]> {
-    console.log('Finding similar cases:', { category, namespace, limit })
-
-    // Get embeddings for query
-    const response = await openai.embeddings.create({
-      model: 'text-embedding-ada-002',
-      input: generateDescription(features),
-      encoding_format: 'float',
+    console.log('Finding similar cases:', {
+      category,
+      namespace,
+      limit,
+      hasVisualFeatures: !!features?.visualFeatures,
     })
-    const queryVector = response.data[0].embedding
-    console.log('Generated query vector with length:', queryVector.length)
 
-    // Query similar vectors using cosine similarity in PostgreSQL
-    console.log('Querying PostgreSQL for similar vectors')
-    const vectors = await prisma.$queryRaw`
-      WITH similarity_matches AS (
+    try {
+      // Get embeddings using CLIP
+      const queryVector = await getClipEmbeddings(imageUrl)
+      console.log('Generated query vector with length:', queryVector.length)
+
+      // Query similar vectors using cosine similarity in PostgreSQL
+      console.log('Querying PostgreSQL for similar vectors')
+      console.log('Using category:', category)
+
+      const vectors = await prisma.$queryRaw<
+        Array<{
+          id: string
+          metadata: any
+          similarity: number
+        }>
+      >`
+        WITH vector_elements AS (
+          SELECT 
+            v.id,
+            v.metadata,
+            v."namespaceId",
+            v."createdAt",
+            v."updatedAt",
+            array_agg(x.value::float) as vector_array
+          FROM "Vector" v
+          JOIN "Namespace" n ON v."namespaceId" = n.id,
+          LATERAL jsonb_array_elements_text(v.metadata->'features'->'visualFeatures') as x(value)
+          WHERE n.id = ${namespace}
+            AND v.metadata->>'category' = ${category}
+          GROUP BY v.id, v.metadata, v."namespaceId", v."createdAt", v."updatedAt"
+        )
         SELECT 
-          v.id,
-          v.metadata,
-          v."namespaceId",
-          v."createdAt",
-          v."updatedAt",
-          1 - (array_to_vector(${queryVector}::float[]) <=> v.embedding) as similarity
-        FROM "Vector" v
-        JOIN "Namespace" n ON v."namespaceId" = n.id
-        WHERE n.id = ${namespace}
-          AND v.metadata->>'category' = ${category}
-        ORDER BY array_to_vector(${queryVector}::float[]) <=> v.embedding
-        LIMIT ${limit * 2}
-      )
-      SELECT * FROM similarity_matches
-      WHERE similarity > 0.7  -- Only return reasonably similar matches
-      ORDER BY similarity DESC
-    `
+          ve.id,
+          ve.metadata,
+          1 - (array_to_vector(${queryVector}::float[]) <=> array_to_vector(ve.vector_array)) as similarity
+        FROM vector_elements ve
+        WHERE 1 - (array_to_vector(${queryVector}::float[]) <=> array_to_vector(ve.vector_array)) > 0.85
+        ORDER BY similarity DESC
+        LIMIT ${limit}
+      `
 
-    console.log('Found vectors:', {
-      count: (vectors as any[]).length,
-      similarities: (vectors as any[]).map((v) => v.similarity),
-    })
+      console.log('Raw vector matches:', {
+        count: vectors.length,
+        matches: vectors,
+      })
 
-    // Map results to SimilarCase type
-    return (
-      vectors as Array<{ metadata: Prisma.JsonValue; similarity: number }>
-    ).map((v) => {
-      const metadata = v.metadata as unknown as VectorMetadata
-      // Convert string diagnosis to ValidationDiagnosis
-      const diagnosis: ValidationDiagnosis =
-        typeof metadata.diagnosis === 'string'
-          ? {
-              overall_assessment: metadata.diagnosis,
-              confidence_level: metadata.confidence,
-              key_observations: [],
-              matched_criteria: [],
-              failed_criteria: [],
-              detailed_explanation: metadata.diagnosis,
-            }
-          : metadata.diagnosis
-      return {
-        imageUrl: '', // Required by SimilarCase type but not stored in vector store
-        category: metadata.category,
-        state: metadata.state,
-        features: metadata.features,
-        diagnosis,
-        keyFeatures: metadata.keyFeatures,
-        confidence: metadata.confidence,
+      // Map results to SimilarCase format
+      const results = vectors.map((v) => ({
+        id: v.id,
         similarity: v.similarity,
-      }
-    })
+        category: v.metadata.category as Category,
+        state: v.metadata.state as State,
+        confidence: v.metadata.confidence || 0,
+        diagnosis: v.metadata.diagnosis || '',
+        keyFeatures: v.metadata.keyFeatures || [],
+        imageUrl: v.metadata.imageUrl || null,
+        features: v.metadata.features || null,
+      }))
+
+      console.log('Final mapped results:', {
+        count: results.length,
+        results,
+      })
+
+      return results
+    } catch (error) {
+      console.error('Failed to get similar cases:', error)
+      throw error
+    }
   }
 
   async clearNamespace(namespace: string): Promise<void> {
-    await prisma.vector.deleteMany({
-      where: {
-        namespaceId: namespace,
-      },
+    await prisma.namespace.delete({
+      where: { id: namespace },
     })
   }
 
@@ -241,44 +276,41 @@ export class PgVectorStore implements VectorStore {
     totalVectors: number
     categories: { [key: string]: number }
   }> {
-    const vectors = await prisma.vector.findMany({
-      where: {
-        namespaceId: namespace,
-      },
-      select: {
-        metadata: true,
-      },
-    })
+    const vectors = await prisma.$queryRaw`
+      SELECT v.metadata->>'category' as category, COUNT(*) as count
+      FROM "Vector" v
+      JOIN "Namespace" n ON v."namespaceId" = n.id
+      WHERE n.id = ${namespace}
+      GROUP BY v.metadata->>'category'
+    `
 
-    // Process vectors to get category counts
-    const categories: { [key: string]: number } = {}
-    vectors.forEach((vector) => {
-      const metadata = vector.metadata as Prisma.JsonObject
-      const category = String(metadata.category || '')
-      categories[category] = (categories[category] || 0) + 1
-    })
+    const categories = (
+      vectors as Array<{ category: string; count: number }>
+    ).reduce(
+      (acc, { category, count }) => ({
+        ...acc,
+        [category]: Number(count),
+      }),
+      {} as { [key: string]: number }
+    )
 
     return {
-      totalVectors: vectors.length,
+      totalVectors: Object.values(categories).reduce(
+        (sum, count) => sum + count,
+        0
+      ),
       categories,
     }
   }
 
   async deleteVector(namespace: string, vectorId: string): Promise<void> {
-    const namespaceRecord = await prisma.namespace.findUnique({
-      where: { id: namespace },
-    })
-
-    if (!namespaceRecord) {
-      throw new Error('Namespace not found')
-    }
-
-    await prisma.vector.delete({
-      where: {
-        id: vectorId,
-        namespaceId: namespaceRecord.id,
-      },
-    })
+    await prisma.$executeRaw`
+      DELETE FROM "Vector" v
+      USING "Namespace" n
+      WHERE v.id = ${vectorId}
+        AND v."namespaceId" = n.id
+        AND n.id = ${namespace}
+    `
   }
 
   async addVector(
@@ -300,7 +332,7 @@ export class PgVectorStore implements VectorStore {
     // Then create vector with confirmed namespace
     const vectorData = {
       id: randomUUID(),
-      embedding: embedding,
+      embedding,
       metadata: metadata as unknown as Prisma.JsonValue,
       namespaceId: namespaceRecord.id,
       createdAt: new Date(),
@@ -339,7 +371,7 @@ export class PgVectorStore implements VectorStore {
         LIMIT ${limit}
       )
       SELECT * FROM similarity_matches
-      WHERE similarity > 0.7  -- Only return reasonably similar matches
+      WHERE similarity > 0.85  -- Require high similarity for confidence boost
       ORDER BY similarity DESC
     `
 

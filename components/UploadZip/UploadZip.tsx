@@ -35,6 +35,12 @@ import {
 } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 interface VectorStoreStats {
   namespace: string
@@ -310,6 +316,10 @@ export const UploadZip = () => {
   const [selectedCategory, setSelectedCategory] = useState('connector_plates')
   const [selectedState, setSelectedState] = useState('straight')
 
+  const [selectedResult, setSelectedResult] = useState<ValidationResult | null>(
+    null
+  )
+
   // Add fetchVectorStats function
   const fetchVectorStats = useCallback(async () => {
     if (!selectedNamespace) return
@@ -479,7 +489,7 @@ export const UploadZip = () => {
       }
 
       const validationResult = await response.json()
-      console.log('Validation result:', validationResult)
+      console.log('Raw API response:', validationResult)
 
       // Parse diagnosis if it's a JSON string
       let parsedDiagnosis: DiagnosisObject | undefined = undefined
@@ -532,9 +542,18 @@ export const UploadZip = () => {
       }
 
       // Determine isValid based on the diagnosis overall assessment
+      console.log('Raw validation result:', validationResult)
       const isValid =
+        validationResult.isValid || // First check the direct isValid flag
+        validationResult.is_valid || // Also check snake_case version
+        parsedDiagnosis?.overall_assessment
+          ?.toLowerCase()
+          .includes('is valid') ||
         parsedDiagnosis?.overall_assessment?.toLowerCase() === 'valid' ||
         parsedDiagnosis?.overall_assessment?.toLowerCase() === 'pass'
+
+      console.log('Computed isValid:', isValid)
+      console.log('Validation diagnosis:', parsedDiagnosis)
 
       // Get detection result from diagnosis or validation result
       const detectionResult =
@@ -549,13 +568,13 @@ export const UploadZip = () => {
         parsedDiagnosis?.matched_criteria ||
         []
 
-      return {
+      const result = {
         filename,
         path,
         category: validationResult.category,
         expectedState: validationResult.expectedState,
         detectedResult: detectionResult,
-        isValid,
+        isValid, // Use our computed isValid value
         confidence:
           parsedDiagnosis?.confidence_level || validationResult.confidence,
         diagnosis: parsedDiagnosis,
@@ -584,6 +603,9 @@ export const UploadZip = () => {
         ),
         vectorStoreUsed: validationResult.vectorStoreUsed,
       }
+
+      console.log('Final mapped result:', result)
+      return result
     } catch (error) {
       console.error('Error processing image:', error)
       throw error
@@ -1664,8 +1686,8 @@ export const UploadZip = () => {
                                     <AccordionTrigger className="text-sm text-white/70 hover:text-white/90 hover:no-underline">
                                       Features
                                     </AccordionTrigger>
-                                    <AccordionContent>
-                                      <div className="space-y-4 pt-2">
+                                    <AccordionContent className="px-4 pb-3">
+                                      <div className="space-y-4">
                                         {/* Structural Features */}
                                         {metadata.features
                                           .structuralFeatures && (
@@ -1912,75 +1934,87 @@ export const UploadZip = () => {
                     <AccordionItem
                       key={index}
                       value={`item-${index}`}
-                      className={`rounded-lg border ${
-                        result.isValid
+                      className={`rounded-lg border ${(() => {
+                        const validationState = result.isValid
+                        console.log(`Result ${index} validation state:`, {
+                          isValid: result.isValid,
+                          confidence: result.confidence,
+                          diagnosis: result.diagnosis,
+                          detectedResult: result.detectedResult,
+                          matchedCriteria: result.matchedCriteria,
+                          failedCriteria: result.failedCriteria,
+                        })
+                        return validationState
                           ? 'border-green-500/20 bg-gradient-to-br from-green-500/5 to-transparent'
                           : 'border-red-500/20 bg-gradient-to-br from-red-500/5 to-transparent'
-                      }`}
+                      })()}`}
                     >
                       <AccordionTrigger className="px-4 py-2 hover:no-underline">
-                        <div className="flex justify-between items-center w-full">
-                          <div className="flex items-center gap-4">
-                            <span className="text-white/90 font-semibold">
-                              {result.filename}
-                            </span>
-                            <div className="flex items-center gap-2 px-2 py-1 rounded-full bg-white/5">
-                              <span className="text-sm text-white/60">
-                                {result.category}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div
-                              className={`px-3 py-1 rounded-full ${
-                                result.isValid
-                                  ? 'bg-green-500/20 text-green-400'
-                                  : 'bg-red-500/20 text-red-400'
-                              }`}
-                            >
-                              {result.diagnosis?.overall_assessment ||
-                                (result.isValid ? 'Pass' : 'Fail')}
-                            </div>
-                            {result.confidence !== undefined && (
-                              <div className="flex items-center gap-2">
-                                <div className="w-20 h-2 bg-white/10 rounded-full overflow-hidden">
-                                  <div
-                                    className={`h-full ${
-                                      result.isValid
-                                        ? 'bg-green-500'
-                                        : 'bg-red-500'
-                                    } transition-all duration-300`}
-                                    style={{
-                                      width: `${result.confidence * 100}%`,
-                                    }}
-                                  />
+                        <div className="grid w-full grid-cols-[2fr,120px,2.5fr,140px] items-center gap-4">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="truncate text-left font-medium">
+                                  {result.filename}
                                 </div>
-                                <span className="text-sm text-white/60 mr-2">
-                                  {typeof result.confidence === 'number'
-                                    ? `${(result.confidence * 100).toFixed(1)}%`
-                                    : 'N/A'}
-                                </span>
-                              </div>
-                            )}
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{result.filename}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+
+                          <div className="text-xs font-medium text-muted-foreground bg-muted/30 px-2 py-1 rounded-full w-fit">
+                            {result.category}
+                          </div>
+
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div
+                                  className={`truncate text-left text-sm ${
+                                    result.isValid
+                                      ? 'text-green-500'
+                                      : 'text-red-500'
+                                  }`}
+                                >
+                                  {result.detectedResult}
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-[300px]">
+                                <p className="break-words">
+                                  {result.detectedResult}
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+
+                          <div className="flex items-center justify-end gap-2 mr-4">
+                            <div className="text-muted-foreground whitespace-nowrap">
+                              {typeof result.confidence === 'number'
+                                ? `${(result.confidence * 100).toFixed(1)}%`
+                                : 'N/A'}
+                            </div>
                             {result.vectorStoreUsed &&
                               result.similarCases &&
                               result.similarCases.length > 0 && (
-                                <div className="flex items-center gap-2 px-2 py-1 bg-blue-500/20 rounded-full">
-                                  <span className="text-sm text-blue-400">
-                                    {result.similarCases.length} similar{' '}
-                                    {result.similarCases.length === 1
-                                      ? 'case'
-                                      : 'cases'}{' '}
-                                    found
-                                  </span>
-                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 py-0 text-xs font-medium bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-full"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setSelectedResult(result)
+                                  }}
+                                >
+                                  {result.similarCases.length} similar
+                                </Button>
                               )}
                           </div>
                         </div>
                       </AccordionTrigger>
                       <AccordionContent>
                         <div className="px-4 py-3 space-y-6">
-                          {/* Path and Basic Info */}
                           <div className="flex items-center gap-2 text-sm text-white/60">
                             <Folder className="h-4 w-4" />
                             {result.path}
@@ -1995,7 +2029,7 @@ export const UploadZip = () => {
                                 </h3>
                                 <div className="space-y-2">
                                   <div className="flex justify-between items-center">
-                                    <span className="text-white/70">
+                                    <span className="text-white/70 mr-2">
                                       Status
                                     </span>
                                     <span

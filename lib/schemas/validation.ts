@@ -72,11 +72,6 @@ export function buildPromptFromCategory(
     ? `Context: ${folderDescription}\n\n`
     : ''
 
-  // Add the custom prompt if provided
-  if (customPrompt) {
-    return `${contextPrompt}${customPrompt}`
-  }
-
   // Build default prompt based on category and state
   let basePrompt = ''
   switch (category.toLowerCase()) {
@@ -105,15 +100,49 @@ Focus on:
       break
 
     case 'connector_plates':
-      basePrompt = `${contextPrompt}Analyze this connector plate image and determine if it is ${expectedState}.
-Focus on:
-1. Overall plate alignment and orientation
-2. Any visible bends, warps, or deformations
-3. Angles and straightness of edges
-4. Signs of physical damage or stress
-5. Proper mounting position and alignment
-6. Surface condition and integrity
-7. Connection point alignment`
+      basePrompt = `${contextPrompt}Analyze this image for connector plates. A connector plate is typically:
+- A metal or rigid plate used for joining or mounting components
+- Often has mounting holes, slots, or attachment points
+- Can be flat, L-shaped, or have specific mounting geometries
+- Usually made of metal or sturdy materials
+- Used in structural or mechanical connections
+
+First verify if the image shows any connector plates matching these characteristics.
+${
+  customPrompt
+    ? `\nSpecific validation task: ${customPrompt}\n`
+    : `\nThen, if connector plates are present, analyze if they are ${expectedState}.\n`
+}
+
+For a "straight" connector plate, specifically verify:
+1. Plate Alignment (CRITICAL):
+   - The plate must be perfectly straight with no bends or twists
+   - All edges should be parallel where intended
+   - No angular deviations from design geometry
+   
+2. Surface Condition (CRITICAL):
+   - No deformations, dents, or warping
+   - Surface should be flat and even
+   - No signs of stress or material fatigue
+   
+3. Connection Points (HIGH):
+   - All mounting holes/slots must be properly aligned
+   - No elongation or damage to connection points
+   - Edges around connection points are intact
+   
+4. Load-Bearing Integrity (CRITICAL):
+   - No signs of stress at load-bearing points
+   - Material thickness appears consistent
+   - No cracks or structural compromises
+   
+5. Installation Compliance (HIGH):
+   - Plate position matches design requirements
+   - Proper clearance maintained
+   - No interference with adjacent components
+
+Remember: Many industrial components may have plate-like elements. Focus specifically on plates designed for connecting or mounting components.
+
+Rate the plate's straightness with high precision, noting any deviations from perfect straightness, even if minor.`
       break
 
     case 'cotter_pins':
@@ -166,6 +195,7 @@ Focus on:
 
     default:
       basePrompt = `${contextPrompt}Analyze this image and determine if the ${category} is ${expectedState}.
+${customPrompt ? `\nSpecific validation task: ${customPrompt}\n` : ''}
 Focus on:
 1. Overall condition
 2. Presence or absence of the component

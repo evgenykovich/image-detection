@@ -16,6 +16,7 @@ export type ValidationType = 'measurement' | 'visual' | 'safety' | 'compliance'
 
 export interface ImageFeatures {
   visualFeatures: number[]
+  semanticFeatures?: string
   structuralFeatures: {
     edges: number
     contrast: number
@@ -34,6 +35,7 @@ export interface SimilarCase {
   category: string
   state: string
   confidence: number
+  similarity: number
   keyFeatures: string[]
   diagnosis?: ValidationDiagnosis
 }
@@ -45,6 +47,7 @@ export interface ValidationDiagnosis {
   matched_criteria: string[]
   failed_criteria: string[]
   detailed_explanation: string
+  [key: string]: string | number | string[]
 }
 
 export interface PhysicalState {
@@ -64,37 +67,15 @@ export interface Characteristics {
 }
 
 export interface ValidationResult {
-  isValid: boolean
+  is_valid: boolean
   confidence: number
   diagnosis: ValidationDiagnosis
-  matchedCriteria: string[]
-  failedCriteria: string[]
-  similarCases?: SimilarCase[]
+  matched_criteria: string[]
+  failed_criteria: string[]
+  similarCases: SimilarCase[]
   explanation: string
-  features?: {
-    structuralFeatures: {
-      edges: number
-      contrast: number
-      brightness: number
-      sharpness: number
-    }
-    metadata: {
-      dimensions: {
-        width: number
-        height: number
-      }
-      format: string
-      size: number
-    }
-    visualFeatures?: number[]
-  }
-  result?: string
-  category?: string
-  expectedState?: string
-  mode?: 'training' | 'validation'
-  vectorStoreUsed?: boolean
-  measurement?: string
-  modelUsed?: string
+  features: ImageFeatures | null
+  modelUsed: string
   characteristics?: Characteristics
 }
 
