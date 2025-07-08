@@ -15,9 +15,12 @@ const openai = new OpenAI({
 
 // Helper to generate description for embedding
 function generateDescription(features: ImageFeatures): string {
-  const { structuralFeatures, metadata } = features
+  const { structuralFeatures, metadata, semanticFeatures } = features
   return `Image Analysis:
-Format: ${metadata.format}, Size: ${metadata.dimensions.width}x${metadata.dimensions.height}
+Semantic Content: ${semanticFeatures || 'No semantic content detected'}
+Format: ${metadata.format}, Size: ${metadata.dimensions.width}x${
+    metadata.dimensions.height
+  }
 Edges: ${structuralFeatures.edges}
 Contrast: ${structuralFeatures.contrast}
 Brightness: ${structuralFeatures.brightness}

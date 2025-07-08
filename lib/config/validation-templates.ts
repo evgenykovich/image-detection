@@ -126,30 +126,57 @@ export const categoryTemplates: Record<Category, CategoryTemplate> = {
     description: 'Validation of connector plate condition and installation',
     validationPoints: [
       {
-        description: 'Plate alignment and orientation',
+        description:
+          'Plate alignment and orientation - Check if the plate is level, perpendicular, or at the specified angle. Look for any tilting or misalignment.',
         importance: 'critical',
         type: 'visual',
       },
       {
-        description: 'Surface deformation assessment',
+        description:
+          'Surface deformation assessment - Look for any bends, warps, dents, or other deformations that could affect plate function.',
         importance: 'critical',
         type: 'visual',
       },
       {
-        description: 'Connection point integrity',
+        description:
+          'Connection point integrity - Examine bolt holes, welds, or other attachment points for proper positioning and condition.',
         importance: 'high',
         type: 'safety',
       },
       {
-        description: 'Load-bearing capacity indicators',
+        description:
+          'Load-bearing capacity indicators - Check plate thickness, material condition, and any signs of stress or fatigue.',
         importance: 'critical',
         type: 'safety',
       },
       {
-        description: 'Installation compliance',
+        description:
+          'Installation compliance - Verify proper mounting, spacing, and alignment with connected components.',
         importance: 'high',
         type: 'compliance',
       },
+      {
+        description:
+          'Edge condition - Check edges for straightness, damage, or deformation.',
+        importance: 'high',
+        type: 'visual',
+      },
+      {
+        description:
+          'Surface finish - Look for corrosion, paint condition, or surface treatments.',
+        importance: 'medium',
+        type: 'visual',
+      },
+    ],
+    industryStandards: [
+      'ASTM F1554 - Standard Specification for Anchor Bolts',
+      'AWS D1.1 - Structural Welding Code',
+    ],
+    safetyConsiderations: [
+      'Load distribution',
+      'Structural integrity',
+      'Connection stability',
+      'Material compatibility',
     ],
   },
   cotter_pins: {

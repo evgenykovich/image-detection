@@ -1,0 +1,21 @@
+# fly.toml app configuration file generated for clip-service on 2025-07-08T01:24:01+03:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'clip-service'
+primary_region = 'fra'
+
+[build]
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  size = "performance-2x"
+  processes = ["app"]

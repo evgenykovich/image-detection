@@ -164,6 +164,7 @@ export async function POST(request: Request) {
     // Add mode information to response
     const response = {
       ...result,
+      isValid: result.is_valid,
       mode: isTrainingMode ? 'training' : 'validation',
       vectorStoreUsed: useVectorStore,
       category,

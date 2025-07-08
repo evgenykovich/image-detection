@@ -127,6 +127,11 @@
   resolved "https://registry.yarnpkg.com/@google/generative-ai/-/generative-ai-0.11.5.tgz#b031c9508061bc8650a6470ef7d77122c083d70a"
   integrity sha512-DviMgrnljEKh6qkDT2pVFW+NEuVhggqBUoEnyy2PNL7l4ewxXRJubk3PctC9yPl1AdRIlhqP7E076QQt+IWuTg==
 
+"@huggingface/inference@1.8.0":
+  version "1.8.0"
+  resolved "https://registry.yarnpkg.com/@huggingface/inference/-/inference-1.8.0.tgz#5b1b22c790451e8051adefe9b7f725a7135c38a8"
+  integrity sha512-Dkh7PiyMf6TINRocQsdceiR5LcqJiUHgWjaBMRpCUOCbs+GZA122VH9q+wodoSptj6rIQf7wIwtDsof+/gd0WA==
+
 "@humanwhocodes/config-array@^0.13.0":
   version "0.13.0"
   resolved "https://registry.yarnpkg.com/@humanwhocodes/config-array/-/config-array-0.13.0.tgz#fb907624df3256d04b9aa2df50d7aa97ec648748"
@@ -779,6 +784,24 @@
     "@radix-ui/react-use-layout-effect" "1.1.1"
     "@radix-ui/react-visually-hidden" "1.2.3"
 
+"@radix-ui/react-tooltip@^1.2.7":
+  version "1.2.7"
+  resolved "https://registry.yarnpkg.com/@radix-ui/react-tooltip/-/react-tooltip-1.2.7.tgz#23612ac7a5e8e1f6829e46d0e0ad94afe3976c72"
+  integrity sha512-Ap+fNYwKTYJ9pzqW+Xe2HtMRbQ/EeWkj2qykZ6SuEV4iS/o1bZI5ssJbk4D2r8XuDuOBVz/tIx2JObtuqU+5Zw==
+  dependencies:
+    "@radix-ui/primitive" "1.1.2"
+    "@radix-ui/react-compose-refs" "1.1.2"
+    "@radix-ui/react-context" "1.1.2"
+    "@radix-ui/react-dismissable-layer" "1.1.10"
+    "@radix-ui/react-id" "1.1.1"
+    "@radix-ui/react-popper" "1.2.7"
+    "@radix-ui/react-portal" "1.1.9"
+    "@radix-ui/react-presence" "1.1.4"
+    "@radix-ui/react-primitive" "2.1.3"
+    "@radix-ui/react-slot" "1.2.3"
+    "@radix-ui/react-use-controllable-state" "1.2.2"
+    "@radix-ui/react-visually-hidden" "1.2.3"
+
 "@radix-ui/react-use-callback-ref@1.1.1":
   version "1.1.1"
   resolved "https://registry.yarnpkg.com/@radix-ui/react-use-callback-ref/-/react-use-callback-ref-1.1.1.tgz#62a4dba8b3255fdc5cc7787faeac1c6e4cc58d40"
@@ -871,6 +894,13 @@
   integrity sha512-6+7nlbMVX/PVDCwaIQ8nTOPveOcFLSt8GcXdx8hD0bt39uWxYT88uXzqTd4fTvqta7oeUJqudepapKNt2DYJFw==
   dependencies:
     tslib "^2.4.0"
+
+"@types/form-data@^2.5.2":
+  version "2.5.2"
+  resolved "https://registry.yarnpkg.com/@types/form-data/-/form-data-2.5.2.tgz#a4dbfd4d5d4a8d0dec9932f1932e2ae7267fc9ae"
+  integrity sha512-tfmcyHn1Pp9YHAO5r40+UuZUPAZbUEgqTel3EuEKpmF9hPkXgR4l41853raliXnb4gwyPNoQOfvgGGlHN5WSog==
+  dependencies:
+    form-data "*"
 
 "@types/formidable@^3.4.5":
   version "3.4.5"
@@ -2343,6 +2373,17 @@ form-data-encoder@1.7.2:
   resolved "https://registry.yarnpkg.com/form-data-encoder/-/form-data-encoder-1.7.2.tgz#1f1ae3dccf58ed4690b86d87e4f57c654fbab040"
   integrity sha512-qfqtYan3rxrnCk1VYaA4H+Ms9xdpPqvLZa6xmMgFvhO32x7/3J/ExcTd6qpxM0vH2GdMI+poehyBZvqfMTto8A==
 
+form-data@*, form-data@^4.0.3:
+  version "4.0.3"
+  resolved "https://registry.yarnpkg.com/form-data/-/form-data-4.0.3.tgz#608b1b3f3e28be0fccf5901fc85fb3641e5cf0ae"
+  integrity sha512-qsITQPfmvMOSAdeyZ+12I1c+CKSstAFAwu+97zrnWAbIr5u8wfsExUzCesVLC8NgHuRUqNN4Zy6UPWUTRGslcA==
+  dependencies:
+    asynckit "^0.4.0"
+    combined-stream "^1.0.8"
+    es-set-tostringtag "^2.1.0"
+    hasown "^2.0.2"
+    mime-types "^2.1.12"
+
 form-data@^4.0.0:
   version "4.0.2"
   resolved "https://registry.yarnpkg.com/form-data/-/form-data-4.0.2.tgz#35cabbdd30c3ce73deb2c42d3c8d3ed9ca51794c"
@@ -3028,7 +3069,7 @@ keyv@^4.5.3:
   dependencies:
     json-buffer "3.0.1"
 
-langchain@^0.0.150:
+langchain@0.0.150:
   version "0.0.150"
   resolved "https://registry.yarnpkg.com/langchain/-/langchain-0.0.150.tgz#9739fb7b961b26287d97479eb21ab98f943a871c"
   integrity sha512-UXpz9vbMgIOfSmV705FxBRaooleaKITcWcZVgLntetaJmciFTzAlMmF4ca63XGwiGPSpPb/cfLFkE55x8jxUFg==

@@ -1,3 +1,6 @@
+import { ImageFeatures } from '@/types/validation'
+import { createClipEmbedding } from '@/util/clip'
+
 let Sharp: any
 
 if (typeof window === 'undefined') {
@@ -6,17 +9,29 @@ if (typeof window === 'undefined') {
   Sharp = null
 }
 
-import { ImageFeatures } from '@/types/validation'
-import OpenAI from 'openai'
+async function getSemanticContent(imageBuffer: Buffer): Promise<string> {
+  try {
+    // Ensure image is in JPEG format
+    const image = Sharp(imageBuffer)
+    const jpegBuffer = await image.jpeg().toBuffer()
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+    // Get semantic description using CLIP
+    const clipEmbedding = await createClipEmbedding(jpegBuffer)
+
+    // For now, we'll store the raw vector as a string
+    // Later we can add more structured metadata if needed
+    return JSON.stringify(clipEmbedding)
+  } catch (error) {
+    console.error('Error in getSemanticContent:', error)
+    return '' // Return empty string on error to allow fallback to visual features
+  }
+}
 
 function generateImageDescription(features: any): string {
-  const { stats, edges, sharpness, metadata } = features
+  const { stats, edges, sharpness, metadata, semanticContent } = features
 
   return `Image Analysis:
+- Vector Embedding: ${semanticContent}
 - Format: ${metadata.format}, Size: ${metadata.width}x${metadata.height}
 - Color Statistics:
   * Red Channel: mean=${stats.channels[0].mean.toFixed(
@@ -67,21 +82,23 @@ export async function extractImageFeatures(
     })
     .stats()
 
+  // Get semantic content using CLIP embeddings
+  const semanticContent = await getSemanticContent(imageBuffer)
+
   const description = generateImageDescription({
     stats,
     edges,
     sharpness,
     metadata,
+    semanticContent,
   })
 
-  const embedding = await openai.embeddings.create({
-    model: 'text-embedding-3-small',
-    input: description,
-    encoding_format: 'float',
-  })
+  // Use CLIP embeddings directly
+  const clipEmbedding = await createClipEmbedding(imageBuffer)
 
   return {
-    visualFeatures: embedding.data[0].embedding,
+    visualFeatures: clipEmbedding,
+    semanticFeatures: semanticContent,
     structuralFeatures: {
       edges: edges.channels[0].mean,
       contrast: Math.max(

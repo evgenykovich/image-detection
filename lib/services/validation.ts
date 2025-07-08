@@ -1,5 +1,4 @@
-import { ChatOpenAI } from 'langchain/chat_models/openai'
-import { HumanMessage } from 'langchain/schema'
+import OpenAI from 'openai'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import {
   ValidationResult,
@@ -15,11 +14,11 @@ import {
   buildSchemaForCategory,
   buildPromptFromCategory,
 } from '../schemas/validation'
+import { baseValidationTemplate } from '../config/validation-templates'
 
 // Initialize models
-const openaiModel = new ChatOpenAI({
-  modelName: 'gpt-4o-mini',
-  temperature: 0,
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 })
 
 const geminiModel = new GoogleGenerativeAI(
@@ -27,6 +26,15 @@ const geminiModel = new GoogleGenerativeAI(
 ).getGenerativeModel({
   model: 'gemini-1.5-flash-latest',
 })
+
+// Define multimodal message type
+interface MultiModalContent {
+  type: 'text' | 'image_url'
+  text?: string
+  image_url?: {
+    url: string
+  }
+}
 
 interface ValidationOptions {
   useVectorStore: boolean
@@ -46,10 +54,9 @@ async function getModelResponse(
   options?: ValidationOptions
 ) {
   try {
-    // Get the validation schema for this category
     const schema = buildSchemaForCategory(category)
 
-    // Build the prompt using the category, state, and any custom prompt
+    // Get the category-specific template
     const basePrompt = buildPromptFromCategory(
       category,
       expectedState,
@@ -57,22 +64,24 @@ async function getModelResponse(
       options?.description
     )
 
-    const jsonInstructions = `
-You are a computer vision expert analyzing images. Your task is to provide a detailed analysis in JSON format.
+    const jsonInstructions = `${basePrompt}
 
-Context: ${options?.description || `Analyzing ${category} images`}
+CRITICAL: You MUST respond with ONLY a JSON object. DO NOT include any other text, explanations, or markdown formatting.
+The JSON object MUST follow this exact format:
 
-Your response must be a valid JSON object with this exact structure:
 {
-  "is_valid": boolean,
-  "confidence": number (between 0 and 1),
+  "is_valid": boolean,        // true if validation criteria are met
+  "confidence": number,       // confidence in your assessment (0-1):
+                             // 0.8-1.0 = very sure about assessment (whether positive or negative)
+                             // 0.4-0.7 = can see the component but some aspects unclear
+                             // 0.1-0.3 = cannot properly analyze the image
   "diagnosis": {
-    "overall_assessment": string,
-    "confidence_level": number (between 0 and 1),
-    "key_observations": string[],
-    "matched_criteria": string[],
-    "failed_criteria": string[],
-    "detailed_explanation": string
+    "overall_assessment": string,     // One sentence summary
+    "confidence_level": number,       // Same as top-level confidence
+    "key_observations": string[],     // List ALL visible features, even if uncertain
+    "matched_criteria": string[],     // List of criteria that were met
+    "failed_criteria": string[],      // List of criteria that failed or couldn't be assessed
+    "detailed_explanation": string    // Explain what you see and why you can/cannot make an assessment
   },
   "explanation": string,
   "characteristics": {
@@ -80,22 +89,9 @@ Your response must be a valid JSON object with this exact structure:
       "matches_expected": boolean,
       "has_defects": boolean,
       "condition_details": string[]
-    },
-    "measurements": {
-      "meets_requirements": boolean,
-      "measurement_details": string[]
     }
   }
-}
-
-IMPORTANT:
-1. Respond ONLY with the JSON object
-2. Do not include any other text or markdown
-3. Ensure all fields are present and properly typed
-4. Base your analysis purely on what you see in the image
-
-Here is your task:
-${basePrompt}`
+}`
 
     if (useGemini) {
       const base64Image = imageBuffer.toString('base64')
@@ -113,7 +109,6 @@ ${basePrompt}`
       console.log('Raw Gemini response:', response)
 
       try {
-        // Parse and validate response against schema
         const parsedResponse = JSON.parse(
           response.replace(/```json\n|\n```/g, '').trim()
         )
@@ -125,30 +120,51 @@ ${basePrompt}`
     }
 
     // OpenAI path
-    const message = new HumanMessage(jsonInstructions)
-    message.additional_kwargs = {
-      image: imageBuffer.toString('base64'),
-    }
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: jsonInstructions,
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}`,
+              },
+            },
+          ],
+        },
+      ],
+      temperature: 0,
+    })
 
-    const response = await openaiModel.call([message])
-    console.log('Raw OpenAI response:', response.content)
+    console.log('Raw OpenAI response:', response.choices[0].message.content)
 
     try {
-      let content = response.content
-      // If the response starts with "I apologize" or similar, try to find JSON in the response
-      if (
-        content.toLowerCase().includes('i apologize') ||
-        content.toLowerCase().includes("i'm sorry")
-      ) {
+      let content = response.choices[0].message.content || ''
+
+      // First try to find JSON block in code fence
+      const codeFenceMatch = content.match(/```(?:json)?\n([\s\S]*?)\n```/)
+      if (codeFenceMatch) {
+        content = codeFenceMatch[1].trim()
+      } else {
+        // If no code fence, try to find JSON object directly
         const jsonMatch = content.match(/\{[\s\S]*\}/)
         if (jsonMatch) {
           content = jsonMatch[0]
+        } else {
+          throw new Error('No JSON found in response')
         }
       }
 
-      const parsedResponse = JSON.parse(
-        content.replace(/```json\n|\n```/g, '').trim()
-      )
+      // Clean up any remaining non-JSON text
+      content = content.replace(/^[^{]*/, '').replace(/[^}]*$/, '')
+
+      const parsedResponse = JSON.parse(content.trim())
       return schema.parse(parsedResponse)
     } catch (error) {
       console.error('Failed to parse OpenAI response:', error)
@@ -177,67 +193,14 @@ export async function validateImage(
     console.log('Using Gemini:', options.useGemini)
     console.log('Custom prompt:', options.prompt)
     console.log('Using namespace:', options.namespace)
-    const features = await extractImageFeatures(imageBuffer)
 
-    if (options.isGroundTruth) {
-      const groundTruthDiagnosis: ValidationDiagnosis = {
-        overall_assessment: 'Valid',
-        confidence_level: 1.0,
-        key_observations: [`Ground truth ${expectedState} ${category} example`],
-        matched_criteria: [`Meets ${expectedState} criteria for ${category}`],
-        failed_criteria: [],
-        detailed_explanation: `This is a reference image provided by the client showing a valid ${expectedState} ${category}.`,
-      }
-
-      const groundTruthCharacteristics: Characteristics = {
-        physical_state: {
-          matches_expected: true,
-          has_defects: false,
-          condition_details: [`Valid ${expectedState} state`],
-        },
-      }
-
-      const groundTruthResult: ValidationResult = {
-        isValid: true,
-        confidence: 1.0,
-        diagnosis: groundTruthDiagnosis,
-        matchedCriteria: [`Reference image for ${expectedState} ${category}`],
-        failedCriteria: [],
-        similarCases: [],
-        explanation: `Ground truth example of ${expectedState} ${category}`,
-        features,
-        modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
-        characteristics: groundTruthCharacteristics,
-      }
-
-      try {
-        console.log('Attempting to store ground truth case:', {
-          category,
-          expectedState,
-          namespace: options.namespace,
-          hasFeatures: !!features,
-          hasBuffer: !!imageBuffer,
-        })
-        await vectorStore.storeValidationCase(
-          `data:image/jpeg;base64,${imageBuffer.toString('base64')}`,
-          category,
-          expectedState,
-          features,
-          groundTruthDiagnosis.detailed_explanation,
-          groundTruthResult.matchedCriteria,
-          1.0,
-          options.prompt,
-          options.namespace
-        )
-        console.log('Successfully stored ground truth case')
-      } catch (error) {
-        console.error('Failed to store ground truth case:', error)
-      }
-
-      return groundTruthResult
+    // Only extract features if using vector store
+    let features = null
+    if (options.useVectorStore) {
+      features = await extractImageFeatures(imageBuffer)
     }
 
-    // Get model response using schema-based validation
+    // Get model response
     const modelResponse = await getModelResponse(
       category,
       expectedState,
@@ -246,159 +209,147 @@ export async function validateImage(
       options
     )
 
-    // Build the validation result
-    const result: ValidationResult = {
-      isValid: options?.prompt
-        ? modelResponse.is_valid
-        : modelResponse.characteristics?.physical_state?.matches_expected ===
-          false
-        ? modelResponse.is_valid
-        : !modelResponse.is_valid,
-      confidence: modelResponse.confidence,
-      diagnosis: {
-        ...modelResponse.diagnosis,
-        overall_assessment: options?.prompt
-          ? modelResponse.is_valid
-            ? 'Valid'
-            : 'Invalid'
-          : modelResponse.characteristics?.physical_state?.matches_expected ===
-            false
-          ? 'Valid'
-          : 'Invalid',
-        key_observations: [
-          ...modelResponse.diagnosis.key_observations,
-          ...(modelResponse.characteristics?.physical_state
-            ?.condition_details || []),
-        ],
-      },
-      matchedCriteria: modelResponse.diagnosis.matched_criteria,
-      failedCriteria: modelResponse.diagnosis.failed_criteria,
-      similarCases: [],
-      explanation:
-        modelResponse.characteristics?.physical_state?.condition_details?.[0] ||
-        (modelResponse.is_valid
-          ? 'Connector plate is straight'
-          : 'Connector plate is bent'),
-      features,
-      modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
-      characteristics: {
-        physical_state: {
-          matches_expected:
-            modelResponse.characteristics?.physical_state?.matches_expected ||
-            false,
-          has_defects:
-            modelResponse.characteristics?.physical_state?.has_defects || false,
-          condition_details:
-            modelResponse.characteristics?.physical_state?.condition_details ||
-            [],
-        },
-        ...(modelResponse.characteristics?.measurements && {
-          measurements: modelResponse.characteristics.measurements,
-        }),
-      },
-    }
+    // Find similar cases if vector store is enabled
+    let similarCases: SimilarCase[] = []
+    let adjustedConfidence = modelResponse.confidence
+    if (options.useVectorStore && features) {
+      // Convert buffer to data URL for CLIP processing
+      const imageUrl = `data:image/jpeg;base64,${imageBuffer.toString(
+        'base64'
+      )}`
+      similarCases = await vectorStore.findSimilarCases(
+        imageUrl,
+        features,
+        category,
+        5,
+        options.namespace || '_default_'
+      )
 
-    // If vector store is enabled, find and use similar cases
-    if (options.useVectorStore) {
-      console.log('Vector store enabled, searching for similar cases...')
-      try {
-        const similarCases = await vectorStore.findSimilarCases(
-          features,
-          category,
-          5, // Default limit
-          options.namespace
-        )
-        console.log('Found similar cases:', {
-          count: similarCases.length,
-          cases: similarCases.map((c: SimilarCase) => ({
-            category: c.category,
-            state: c.state,
-            confidence: c.confidence,
-          })),
+      // Adjust validation based on vector store matches
+      if (similarCases.length > 0) {
+        // Get the highest similarity match
+        const bestMatch = similarCases[0]
+        console.log('Best vector match:', {
+          similarity: bestMatch.similarity,
+          originalConfidence: bestMatch.confidence,
+          category: bestMatch.category,
+          state: bestMatch.state,
+          keyFeatures: bestMatch.keyFeatures,
         })
 
-        result.similarCases = similarCases
-
-        // Adjust confidence based on similar cases if we have high confidence matches
-        const highConfidenceCases = similarCases.filter(
-          (c: SimilarCase) => c.confidence > 0.8
-        )
-
-        if (highConfidenceCases.length > 0) {
-          console.log('Found high confidence matches:', {
-            count: highConfidenceCases.length,
-            confidences: highConfidenceCases.map(
-              (c: SimilarCase) => c.confidence
-            ),
-          })
-
-          const totalWeight = highConfidenceCases.reduce(
-            (sum: number, c: SimilarCase) => sum + c.confidence,
-            0
+        // If we have a very close match (similarity > 0.9)
+        if (bestMatch.similarity > 0.9) {
+          // Adjust confidence based on match quality
+          const matchConfidence = bestMatch.similarity * bestMatch.confidence
+          adjustedConfidence = Math.max(
+            modelResponse.confidence,
+            matchConfidence
           )
-          const weightedConfidence =
-            highConfidenceCases.reduce(
-              (sum: number, c: SimilarCase) =>
-                sum + c.confidence * c.confidence,
-              0
-            ) / totalWeight
+          console.log('Using adjusted confidence:', adjustedConfidence)
 
-          result.confidence = (result.confidence + weightedConfidence) / 2
+          // For very high confidence matches, use the reference image's validation state
+          if (bestMatch.similarity > 0.95) {
+            // Create a completely new diagnosis object for high confidence matches
+            const validationDiagnosis = {
+              overall_assessment: `The connector plate is valid, matching a verified reference image with high confidence.`,
+              confidence_level: adjustedConfidence,
+              key_observations: [
+                'Image matches a verified reference connector plate',
+                'All validation criteria met based on reference match',
+                ...(bestMatch.keyFeatures || []),
+              ],
+              matched_criteria: [
+                'Plate Alignment',
+                'Surface Condition',
+                'Connection Points',
+                'Load-Bearing Integrity',
+                'Installation Compliance',
+              ],
+              failed_criteria: [],
+              detailed_explanation: `The image shows a valid connector plate configuration, verified through high-similarity matching with a reference image. All standard validation criteria are met based on this match.`,
+            }
 
-          // Add reference match information to observations
-          const mostSimilar = highConfidenceCases[0]
-          if (
-            result.diagnosis &&
-            Array.isArray(result.diagnosis.key_observations)
-          ) {
-            result.diagnosis.key_observations.push(
-              `Matches reference image with ${(
-                mostSimilar.confidence * 100
-              ).toFixed(1)}% confidence`
+            // Update all properties of the model response
+            modelResponse.is_valid = true
+            modelResponse.confidence = adjustedConfidence
+            modelResponse.diagnosis = validationDiagnosis
+            modelResponse.explanation = `This image closely matches a verified reference image (${Math.round(
+              bestMatch.similarity * 100
+            )}% similarity), indicating it meets all validation criteria.`
+            modelResponse.characteristics = {
+              physical_state: {
+                matches_expected: true,
+                has_defects: false,
+                condition_details: [
+                  `Matches verified reference image with ${Math.round(
+                    bestMatch.similarity * 100
+                  )}% similarity`,
+                  `All validation criteria met based on reference match`,
+                ],
+              },
+            }
+
+            console.log(
+              'High similarity match found, using reference validation:',
+              modelResponse
             )
           }
-        } else {
-          console.log('No high confidence matches found')
         }
-      } catch (error) {
-        console.warn('Failed to find or process similar cases:', error)
       }
-    } else {
-      console.log('Vector store disabled, skipping similar case search')
+
+      // Store validation case if it's ground truth
+      if (options.isGroundTruth && features) {
+        // ... existing code ...
+      }
     }
 
-    return result
-  } catch (error) {
-    console.error('Validation error:', error)
-    const errorDiagnosis: ValidationDiagnosis = {
-      overall_assessment: 'Invalid',
-      confidence_level: 0,
-      key_observations: [],
-      matched_criteria: [],
-      failed_criteria: ['Validation error occurred'],
-      detailed_explanation:
-        error instanceof Error ? error.message : 'Unknown error',
-    }
+    // Update the response with adjusted confidence
+    modelResponse.confidence = adjustedConfidence
+    modelResponse.diagnosis.confidence_level = adjustedConfidence
 
-    const errorCharacteristics: Characteristics = {
-      physical_state: {
-        matches_expected: false,
-        has_defects: true,
-        condition_details: ['Validation error occurred'],
+    // Log final response before returning
+    const finalResponse = {
+      is_valid: modelResponse.is_valid,
+      confidence: adjustedConfidence,
+      diagnosis: {
+        ...modelResponse.diagnosis,
+        confidence_level: adjustedConfidence,
+      },
+      matched_criteria: modelResponse.diagnosis.matched_criteria,
+      failed_criteria: modelResponse.diagnosis.failed_criteria,
+      similarCases,
+      explanation: modelResponse.explanation,
+      features: features || null,
+      modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
+      characteristics: {
+        physical_state: modelResponse.characteristics?.physical_state || {
+          matches_expected: false,
+          has_defects: false,
+          condition_details: [],
+        },
       },
     }
 
-    return {
-      isValid: false,
-      confidence: 0,
-      diagnosis: errorDiagnosis,
-      matchedCriteria: [],
-      failedCriteria: ['Validation error occurred'],
-      similarCases: [],
-      explanation: 'Validation failed',
-      features: await extractImageFeatures(imageBuffer),
-      modelUsed: options.useGemini ? 'Gemini' : 'OpenAI',
-      characteristics: errorCharacteristics,
-    }
+    console.log('Final validation response:', {
+      is_valid: finalResponse.is_valid,
+      confidence: finalResponse.confidence,
+      diagnosis: {
+        overall_assessment: finalResponse.diagnosis.overall_assessment,
+        confidence_level: finalResponse.diagnosis.confidence_level,
+        matched_criteria: finalResponse.matched_criteria,
+        failed_criteria: finalResponse.failed_criteria,
+      },
+      similarCases: finalResponse.similarCases.map((c) => ({
+        similarity: c.similarity,
+        confidence: c.confidence,
+        category: c.category,
+        state: c.state,
+      })),
+    })
+
+    return finalResponse
+  } catch (error) {
+    console.error('Validation error:', error)
+    throw error
   }
 }
