@@ -248,7 +248,7 @@ export async function validateImage(
           console.log('Using adjusted confidence:', adjustedConfidence)
 
           // For very high confidence matches, use the reference image's validation state
-          if (bestMatch.similarity > 0.95) {
+          if (bestMatch.similarity > 0.9) {
             // Create a completely new diagnosis object for high confidence matches
             const validationDiagnosis = {
               overall_assessment: `The connector plate is valid, matching a verified reference image with high confidence.`,
