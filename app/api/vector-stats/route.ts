@@ -35,7 +35,18 @@ export async function GET(request: Request) {
       },
     })
 
-    // Get some sample metadata to understand the types of vectors stored
+    // Get all unique categories
+    const allVectors = await prisma.vector.findMany({
+      where: { namespaceId: namespace },
+      select: {
+        metadata: true,
+      },
+    })
+    const allCategories = Array.from(
+      new Set(allVectors.map((v) => (v.metadata as any).category))
+    ).filter(Boolean)
+
+    // Get sample metadata with increased limit
     const sampleVectors = await prisma.vector.findMany({
       where: { namespaceId: namespace },
       select: {
@@ -43,7 +54,7 @@ export async function GET(request: Request) {
         metadata: true,
         createdAt: true,
       },
-      take: 5,
+      take: 20,
       orderBy: {
         createdAt: 'desc',
       },
@@ -52,9 +63,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       namespace: namespaceDetails?.name || namespace,
       totalVectors: vectorCount,
-      categories: Array.from(
-        new Set(sampleVectors.map((v) => (v.metadata as any).category))
-      ),
+      categories: allCategories,
       lastUpdated: namespaceDetails?.updatedAt || null,
       created: namespaceDetails?.createdAt || null,
       sampleMetadata: sampleVectors.map((v: VectorData) => ({
