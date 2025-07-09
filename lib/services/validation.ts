@@ -7,6 +7,7 @@ import {
   ValidationDiagnosis,
   Characteristics,
   SimilarCase,
+  ModelResponse,
 } from '@/types/validation'
 import { extractImageFeatures } from './featureExtraction'
 import { vectorStore } from './vectorStorage'
@@ -56,7 +57,7 @@ async function getModelResponse(
   imageBuffer: Buffer,
   useGemini: boolean = false,
   options?: ValidationOptions
-) {
+): Promise<ModelResponse> {
   try {
     const schema = buildSchemaForCategory(category)
 
@@ -116,7 +117,20 @@ The JSON object MUST follow this exact format:
         const parsedResponse = JSON.parse(
           response.replace(/```json\n|\n```/g, '').trim()
         )
-        return schema.parse(parsedResponse)
+        const validatedResponse = schema.parse(parsedResponse)
+        return {
+          ...validatedResponse,
+          matched_criteria: validatedResponse.diagnosis.matched_criteria,
+          failed_criteria: validatedResponse.diagnosis.failed_criteria,
+          characteristics: {
+            physical_state: validatedResponse.characteristics
+              ?.physical_state || {
+              matches_expected: false,
+              has_defects: false,
+              condition_details: [],
+            },
+          },
+        }
       } catch (error) {
         console.error('Failed to parse Gemini response:', error)
         throw new Error('Invalid JSON response from Gemini')
@@ -169,7 +183,19 @@ The JSON object MUST follow this exact format:
       content = content.replace(/^[^{]*/, '').replace(/[^}]*$/, '')
 
       const parsedResponse = JSON.parse(content.trim())
-      return schema.parse(parsedResponse)
+      const validatedResponse = schema.parse(parsedResponse)
+      return {
+        ...validatedResponse,
+        matched_criteria: validatedResponse.diagnosis.matched_criteria,
+        failed_criteria: validatedResponse.diagnosis.failed_criteria,
+        characteristics: {
+          physical_state: validatedResponse.characteristics?.physical_state || {
+            matches_expected: false,
+            has_defects: false,
+            condition_details: [],
+          },
+        },
+      }
     } catch (error) {
       console.error('Failed to parse OpenAI response:', error)
       throw new Error('Invalid JSON response from OpenAI')
@@ -213,6 +239,9 @@ export async function validateImage(
       options
     )
 
+    // Get validation criteria for the current category
+    const validationCriteria = getCategoryValidationCriteria(category)
+
     // Find similar cases if vector store is enabled
     let similarCases: SimilarCase[] = []
     let adjustedConfidence = modelResponse.confidence
@@ -230,7 +259,7 @@ export async function validateImage(
       )
 
       // Adjust validation based on vector store matches
-      if (similarCases.length > 0) {
+      if (similarCases.length > 0 && !options.isGroundTruth) {
         // Get the highest similarity match
         const bestMatch = similarCases[0]
         console.log('Best vector match:', {
@@ -249,9 +278,6 @@ export async function validateImage(
 
           // For very high confidence matches, use the reference image's validation state
           if (bestMatch.similarity > 0.9) {
-            // Get validation criteria for the current category
-            const validationCriteria = getCategoryValidationCriteria(category)
-
             // Create a completely new diagnosis object for high confidence matches
             const validationDiagnosis = {
               overall_assessment: `The image is valid, matching a verified reference image with ${Math.round(
@@ -307,6 +333,33 @@ export async function validateImage(
 
       // Store validation case if it's ground truth
       if (options.isGroundTruth && features) {
+        // In tuning mode, set confidence to 1.0 (100%) since it's ground truth
+        modelResponse.confidence = 1.0
+        modelResponse.is_valid = true // Ground truth examples are valid by definition
+
+        // In tuning mode, standardize the response format and override assessment
+        const standardizedDiagnosis = {
+          overall_assessment: `This is a verified reference image showing a valid ${category.toLowerCase()} in ${expectedState.toLowerCase()} state.`,
+          confidence_level: 1.0, // Set to 100% for ground truth
+          key_observations: [
+            `Verified reference image for ${category.toLowerCase()}`,
+            `Demonstrates ${expectedState.toLowerCase()} state`,
+            'All validation criteria met',
+            ...(options.prompt ? [`Reference context: ${options.prompt}`] : []),
+          ],
+          matched_criteria: validationCriteria,
+          failed_criteria: [], // No failed criteria in ground truth
+          detailed_explanation: `This image serves as a reference example of a valid ${category.toLowerCase()} in ${expectedState.toLowerCase()} state. It has been manually verified and meets all validation criteria.${
+            options.prompt ? ` Context: ${options.prompt}` : ''
+          }`,
+        }
+
+        // Update model response with standardized format
+        modelResponse.diagnosis = standardizedDiagnosis
+        modelResponse.matched_criteria = standardizedDiagnosis.matched_criteria
+        modelResponse.failed_criteria = standardizedDiagnosis.failed_criteria
+        modelResponse.explanation = standardizedDiagnosis.overall_assessment
+
         const imageUrl = `data:image/jpeg;base64,${imageBuffer.toString(
           'base64'
         )}`
@@ -315,9 +368,9 @@ export async function validateImage(
           category,
           expectedState,
           features,
-          modelResponse.diagnosis,
-          modelResponse.diagnosis.key_observations,
-          modelResponse.confidence,
+          standardizedDiagnosis,
+          standardizedDiagnosis.key_observations,
+          1.0, // Store with 100% confidence since it's ground truth
           options.prompt,
           options.namespace || '_default_'
         )

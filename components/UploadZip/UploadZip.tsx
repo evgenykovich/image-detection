@@ -71,7 +71,16 @@ interface VectorStoreStats {
       }
       visualFeatures?: number[]
     }
-    diagnosis?: string
+    diagnosis?:
+      | string
+      | {
+          overall_assessment: string
+          confidence_level: number
+          key_observations: string[]
+          matched_criteria: string[]
+          failed_criteria: string[]
+          detailed_explanation: string
+        }
     keyFeatures?: string[]
     prompt?: string
   }[]
@@ -1651,7 +1660,9 @@ export const UploadZip = () => {
                                 <div className="space-y-2">
                                   {metadata.diagnosis && (
                                     <p className="text-sm text-white/70">
-                                      {metadata.diagnosis}
+                                      {typeof metadata.diagnosis === 'string'
+                                        ? metadata.diagnosis
+                                        : metadata.diagnosis.overall_assessment}
                                     </p>
                                   )}
                                   {metadata.keyFeatures &&

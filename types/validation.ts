@@ -66,8 +66,7 @@ export interface Measurements {
 }
 
 export interface Characteristics {
-  physical_state: PhysicalState
-  measurements?: Measurements
+  physical_state?: PhysicalState
 }
 
 export interface ValidationResult {
@@ -137,4 +136,14 @@ export interface ValidationResponse {
   mode?: 'training' | 'validation'
   vectorStoreUsed?: boolean
   measurement?: string
+}
+
+export interface ModelResponse {
+  is_valid: boolean
+  confidence: number
+  diagnosis: ValidationDiagnosis
+  explanation: string
+  characteristics: Characteristics
+  matched_criteria?: string[]
+  failed_criteria?: string[]
 }
