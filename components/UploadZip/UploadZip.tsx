@@ -1522,8 +1522,20 @@ export const UploadZip = () => {
                 </p>
               </div>
 
+              {/* Loading State */}
+              {isLoadingStats && (
+                <div className="flex items-center justify-center h-[200px]">
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                    <p className="text-sm text-white/70">
+                      Loading vector store data...
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Vector Store Stats */}
-              {vectorStats && (
+              {!isLoadingStats && vectorStats && (
                 <div className="mt-6 space-y-4">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <div className="p-4 bg-white/5 rounded-lg">
