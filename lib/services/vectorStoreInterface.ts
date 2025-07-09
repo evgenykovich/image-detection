@@ -35,6 +35,13 @@ export interface VectorStore {
     namespace?: string
   ): Promise<SimilarCase[]>
 
+  findSimilar(
+    namespace: string,
+    embedding: number[],
+    category?: Category,
+    limit?: number
+  ): Promise<Array<{ id: string; metadata: any; similarity: number }>>
+
   clearNamespace(namespace: string): Promise<void>
 
   getStats(namespace: string): Promise<{
@@ -47,12 +54,6 @@ export interface VectorStore {
     embedding: number[],
     metadata: Record<string, any>
   ): Promise<void>
-
-  findSimilar(
-    namespace: string,
-    embedding: number[],
-    limit?: number
-  ): Promise<Array<{ id: string; metadata: any; similarity: number }>>
 
   deleteVector(namespace: string, vectorId: string): Promise<void>
 }

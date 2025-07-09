@@ -13,8 +13,12 @@ import { vectorStore } from './vectorStorage'
 import {
   buildSchemaForCategory,
   buildPromptFromCategory,
+  getCategoryValidationCriteria,
 } from '../schemas/validation'
-import { baseValidationTemplate } from '../config/validation-templates'
+import {
+  baseValidationTemplate,
+  categoryTemplates,
+} from '../config/validation-templates'
 
 // Initialize models
 const openai = new OpenAI({
@@ -239,34 +243,33 @@ export async function validateImage(
 
         // If we have a very close match (similarity > 0.9)
         if (bestMatch.similarity > 0.9) {
-          // Adjust confidence based on match quality
-          const matchConfidence = bestMatch.similarity * bestMatch.confidence
-          adjustedConfidence = Math.max(
-            modelResponse.confidence,
-            matchConfidence
-          )
-          console.log('Using adjusted confidence:', adjustedConfidence)
+          // When using vector store matches, our confidence should be based on the similarity score
+          adjustedConfidence = bestMatch.similarity
+          console.log('Using similarity as confidence:', adjustedConfidence)
 
           // For very high confidence matches, use the reference image's validation state
           if (bestMatch.similarity > 0.9) {
+            // Get validation criteria for the current category
+            const validationCriteria = getCategoryValidationCriteria(category)
+
             // Create a completely new diagnosis object for high confidence matches
             const validationDiagnosis = {
-              overall_assessment: `The connector plate is valid, matching a verified reference image with high confidence.`,
+              overall_assessment: `The image is valid, matching a verified reference image with ${Math.round(
+                bestMatch.similarity * 100
+              )}% confidence.`,
               confidence_level: adjustedConfidence,
               key_observations: [
-                'Image matches a verified reference connector plate',
+                `Image matches a verified reference image with ${Math.round(
+                  bestMatch.similarity * 100
+                )}% similarity`,
                 'All validation criteria met based on reference match',
                 ...(bestMatch.keyFeatures || []),
               ],
-              matched_criteria: [
-                'Plate Alignment',
-                'Surface Condition',
-                'Connection Points',
-                'Load-Bearing Integrity',
-                'Installation Compliance',
-              ],
+              matched_criteria: validationCriteria,
               failed_criteria: [],
-              detailed_explanation: `The image shows a valid connector plate configuration, verified through high-similarity matching with a reference image. All standard validation criteria are met based on this match.`,
+              detailed_explanation: `The image shows a valid configuration, verified through high-similarity matching with a reference image from ${
+                bestMatch.metadata?.prompt || 'the reference set'
+              }. All standard validation criteria are met based on this match.`,
             }
 
             // Update all properties of the model response
@@ -275,7 +278,9 @@ export async function validateImage(
             modelResponse.diagnosis = validationDiagnosis
             modelResponse.explanation = `This image closely matches a verified reference image (${Math.round(
               bestMatch.similarity * 100
-            )}% similarity), indicating it meets all validation criteria.`
+            )}% similarity) from ${
+              bestMatch.metadata?.prompt || 'the reference set'
+            }, indicating it meets all validation criteria.`
             modelResponse.characteristics = {
               physical_state: {
                 matches_expected: true,
@@ -284,6 +289,9 @@ export async function validateImage(
                   `Matches verified reference image with ${Math.round(
                     bestMatch.similarity * 100
                   )}% similarity`,
+                  `Reference image from: ${
+                    bestMatch.metadata?.prompt || 'reference set'
+                  }`,
                   `All validation criteria met based on reference match`,
                 ],
               },
@@ -299,7 +307,21 @@ export async function validateImage(
 
       // Store validation case if it's ground truth
       if (options.isGroundTruth && features) {
-        // ... existing code ...
+        const imageUrl = `data:image/jpeg;base64,${imageBuffer.toString(
+          'base64'
+        )}`
+        await vectorStore.storeValidationCase(
+          imageUrl,
+          category,
+          expectedState,
+          features,
+          modelResponse.diagnosis,
+          modelResponse.diagnosis.key_observations,
+          modelResponse.confidence,
+          options.prompt,
+          options.namespace || '_default_'
+        )
+        console.log('Stored ground truth case in vector store')
       }
     }
 

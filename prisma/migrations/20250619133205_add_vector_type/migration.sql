@@ -1,9 +1,20 @@
-/*
-  Warnings:
+-- Drop existing table and recreate with 512 dimensions
+DROP TABLE IF EXISTS "Vector";
 
-  - Changed the type of `embedding` on the `Vector` table. No cast exists, the column would be dropped and recreated, which cannot be done if there is data, since the column is required.
+-- CreateTable
+CREATE TABLE "Vector" (
+    "id" TEXT NOT NULL,
+    "embedding" vector(512),
+    "metadata" JSONB NOT NULL,
+    "namespaceId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
-*/
--- AlterTable
-ALTER TABLE "Vector" DROP COLUMN "embedding",
-ADD COLUMN     "embedding" vector NOT NULL;
+    CONSTRAINT "Vector_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "Vector_namespaceId_idx" ON "Vector"("namespaceId");
+
+-- AddForeignKey
+ALTER TABLE "Vector" ADD CONSTRAINT "Vector_namespaceId_fkey" FOREIGN KEY ("namespaceId") REFERENCES "Namespace"("id") ON DELETE CASCADE ON UPDATE CASCADE;

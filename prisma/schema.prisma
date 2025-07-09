@@ -18,10 +18,9 @@ model Namespace {
   updatedAt DateTime
 }
 
-/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model Vector {
   id          String                @id
-  embedding   Unsupported("vector")
+  embedding   Unsupported("vector(512)")
   metadata    Json
   namespaceId String
   createdAt   DateTime              @default(now())

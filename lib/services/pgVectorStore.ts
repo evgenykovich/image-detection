@@ -181,6 +181,39 @@ export class PgVectorStore implements VectorStore {
     return this.findSimilarCases(imageUrl, features, category, 5, namespace)
   }
 
+  async findSimilar(
+    namespace: string,
+    embedding: number[],
+    category?: Category,
+    limit: number = 5
+  ): Promise<
+    Array<{ id: string; metadata: VectorMetadata; similarity: number }>
+  > {
+    try {
+      // Get similar vectors using cosine similarity
+      const results = await prisma.$queryRaw<
+        Array<{ id: string; metadata: VectorMetadata; similarity: number }>
+      >`
+        SELECT id, metadata, 1 - (embedding <=> ${embedding}::vector) as similarity
+        FROM "Vector"
+        WHERE "namespaceId" = ${namespace}
+        ${
+          category
+            ? Prisma.sql`AND metadata->>'category' = ${category}`
+            : Prisma.empty
+        }
+        AND 1 - (embedding <=> ${embedding}::vector) > 0.85
+        ORDER BY similarity DESC
+        LIMIT ${limit}
+      `
+
+      return results
+    } catch (error) {
+      console.error('Failed to find similar vectors:', error)
+      throw error
+    }
+  }
+
   async findSimilarCases(
     imageUrl: string,
     features: ImageFeatures,
@@ -198,68 +231,31 @@ export class PgVectorStore implements VectorStore {
     try {
       // Get embeddings using CLIP
       const queryVector = await getClipEmbeddings(imageUrl)
-      console.log('Generated query vector with length:', queryVector.length)
 
-      // Query similar vectors using cosine similarity in PostgreSQL
-      console.log('Querying PostgreSQL for similar vectors')
-      console.log('Using category:', category)
+      // Find similar vectors
+      const results = await this.findSimilar(
+        namespace,
+        queryVector,
+        category,
+        limit
+      )
 
-      const vectors = await prisma.$queryRaw<
-        Array<{
-          id: string
-          metadata: any
-          similarity: number
-        }>
-      >`
-        WITH vector_elements AS (
-          SELECT 
-            v.id,
-            v.metadata,
-            v."namespaceId",
-            v."createdAt",
-            v."updatedAt",
-            array_agg(x.value::float) as vector_array
-          FROM "Vector" v
-          JOIN "Namespace" n ON v."namespaceId" = n.id,
-          LATERAL jsonb_array_elements_text(v.metadata->'features'->'visualFeatures') as x(value)
-          WHERE n.id = ${namespace}
-            AND v.metadata->>'category' = ${category}
-          GROUP BY v.id, v.metadata, v."namespaceId", v."createdAt", v."updatedAt"
-        )
-        SELECT 
-          ve.id,
-          ve.metadata,
-          1 - (array_to_vector(${queryVector}::float[]) <=> array_to_vector(ve.vector_array)) as similarity
-        FROM vector_elements ve
-        WHERE 1 - (array_to_vector(${queryVector}::float[]) <=> array_to_vector(ve.vector_array)) > 0.85
-        ORDER BY similarity DESC
-        LIMIT ${limit}
-      `
-
-      console.log('Raw vector matches:', {
-        count: vectors.length,
-        matches: vectors,
-      })
-
-      // Map results to SimilarCase format
-      const results = vectors.map((v) => ({
-        id: v.id,
-        similarity: v.similarity,
-        category: v.metadata.category as Category,
-        state: v.metadata.state as State,
-        confidence: v.metadata.confidence || 0,
-        diagnosis: v.metadata.diagnosis || '',
-        keyFeatures: v.metadata.keyFeatures || [],
-        imageUrl: v.metadata.imageUrl || null,
-        features: v.metadata.features || null,
+      // Convert to SimilarCase format
+      return results.map((result) => ({
+        imageUrl: '', // We don't store the actual images
+        category: result.metadata.category,
+        state: result.metadata.state,
+        confidence: result.similarity, // Use similarity as confidence
+        similarity: result.similarity,
+        keyFeatures: result.metadata.keyFeatures || [],
+        diagnosis:
+          typeof result.metadata.diagnosis === 'string'
+            ? undefined
+            : (result.metadata.diagnosis as ValidationDiagnosis),
+        metadata: {
+          prompt: result.metadata.prompt,
+        },
       }))
-
-      console.log('Final mapped results:', {
-        count: results.length,
-        results,
-      })
-
-      return results
     } catch (error) {
       console.error('Failed to get similar cases:', error)
       throw error
@@ -350,42 +346,6 @@ export class PgVectorStore implements VectorStore {
         ${vectorData.updatedAt}
       )
     `
-  }
-
-  async findSimilar(
-    namespace: string,
-    embedding: number[],
-    limit: number = 5
-  ): Promise<Array<{ id: string; metadata: any; similarity: number }>> {
-    // Query similar vectors using cosine similarity in PostgreSQL
-    const vectors = await prisma.$queryRaw`
-      WITH similarity_matches AS (
-        SELECT 
-          v.id,
-          v.metadata,
-          1 - (array_to_vector(${embedding}::float[]) <=> v.embedding) as similarity
-        FROM "Vector" v
-        JOIN "Namespace" n ON v."namespaceId" = n.id
-        WHERE n.id = ${namespace}
-        ORDER BY array_to_vector(${embedding}::float[]) <=> v.embedding
-        LIMIT ${limit}
-      )
-      SELECT * FROM similarity_matches
-      WHERE similarity > 0.85  -- Require high similarity for confidence boost
-      ORDER BY similarity DESC
-    `
-
-    return (
-      vectors as Array<{
-        id: string
-        metadata: Prisma.JsonValue
-        similarity: number
-      }>
-    ).map((v) => ({
-      id: v.id,
-      metadata: v.metadata,
-      similarity: v.similarity,
-    }))
   }
 }
 

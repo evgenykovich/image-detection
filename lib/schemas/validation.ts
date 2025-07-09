@@ -1,5 +1,15 @@
 import { z } from 'zod'
-import { State } from '@/types/validation'
+import { State, Category } from '@/types/validation'
+import { categoryTemplates } from '../config/validation-templates'
+
+// Function to get validation criteria for a category
+export function getCategoryValidationCriteria(category: Category): string[] {
+  return (
+    categoryTemplates[category]?.validationPoints.map(
+      (point) => point.description
+    ) || []
+  )
+}
 
 // Base validation criteria for all categories
 export const BaseValidationSchema = z.object({

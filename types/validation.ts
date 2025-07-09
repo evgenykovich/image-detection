@@ -38,6 +38,10 @@ export interface SimilarCase {
   similarity: number
   keyFeatures: string[]
   diagnosis?: ValidationDiagnosis
+  metadata?: {
+    prompt?: string
+    [key: string]: any
+  }
 }
 
 export interface ValidationDiagnosis {
