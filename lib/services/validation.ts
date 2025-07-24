@@ -270,14 +270,14 @@ export async function validateImage(
           keyFeatures: bestMatch.keyFeatures,
         })
 
-        // If we have a very close match (similarity > 0.9)
-        if (bestMatch.similarity > 0.9) {
+        // If we have a very close match (similarity > 0.85)
+        if (bestMatch.similarity > 0.85) {
           // When using vector store matches, our confidence should be based on the similarity score
           adjustedConfidence = bestMatch.similarity
           console.log('Using similarity as confidence:', adjustedConfidence)
 
           // For very high confidence matches, use the reference image's validation state
-          if (bestMatch.similarity > 0.9) {
+          if (bestMatch.similarity > 0.85) {
             // Create a completely new diagnosis object for high confidence matches
             const validationDiagnosis = {
               overall_assessment: `The image is valid, matching a verified reference image with ${Math.round(
